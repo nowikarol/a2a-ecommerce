@@ -1,7 +1,7 @@
 {
   "sender_id": "R1",
-  "receiver_id": "H1",
-  "message_type": "CALL_FOR_PROPOSAL",
+  "receiver_id": "H2",
+  "message_type": "REJECT_PROPOSAL",
   "item": {
     "name": "tomatoes",
     "quantity": 100

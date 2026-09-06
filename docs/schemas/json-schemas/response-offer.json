@@ -1,0 +1,11 @@
+{
+  "sender_id": "H1",
+  "receiver_id": "R1",
+  "message_type": "PROPOSAL",
+  "item": {
+    "name": "tomatoes",
+    "quantity": 100,
+    "price": 4.50
+  },
+  "total_cost": 450.00
+}
