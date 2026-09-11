@@ -1,0 +1,11 @@
+{
+  "sender_id": "H2",
+  "receiver_id": "R1",
+  "message_type": "DELIVERY",
+  "item": {
+    "name": "passata",
+    "quantity": 50,
+    "price": 5.80
+  },
+  "total_cost": 290.00
+}
