@@ -1,0 +1,16 @@
+"""
+Agent package for Restaurant 1.
+Contains the LLM agent brain (Groq API), business logic tools, and tool execution dispatcher.
+"""
+
+from agent.tools import RestaurantAgent, default_agent, GROQ_TOOLS, execute_tool
+from agent.agent import RestaurantBrain, SYSTEM_PROMPT
+
+__all__ = [
+    "RestaurantAgent",
+    "default_agent",
+    "GROQ_TOOLS",
+    "execute_tool",
+    "RestaurantBrain",
+    "SYSTEM_PROMPT",
+]
