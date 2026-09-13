@@ -1,0 +1,11 @@
+{
+  "sender_id": "H1",
+  "receiver_id": "R1",
+  "message_type": "AVAILABILITY_RESPONSE",
+  "item": {
+    "name": "tomatoes",
+    "quantity": 100
+  },
+  "is_available": true,
+  "available_quantity": 150
+}
