@@ -261,8 +261,8 @@ class TestRestaurantAgentSQLTools:
         assert accept["total_cost"] == 260.00
 
         rejects = result["reject_proposals"]
-        assert len(rejects) == 1
-        assert rejects[0]["receiver_id"] == "H1"
+        # Zgodnie ze standardem protokołu A2A, pozostali sprzedawcy nie otrzymują wiadomości odrzucenia (oferty milcząco wygasają)
+        assert len(rejects) == 0
 
     def test_receive_delivery_with_wallet_deduction(self, temp_restaurant):
         initial_stock = temp_restaurant.check_inventory()["inventory"]["passata"]["quantity"]
@@ -619,7 +619,7 @@ class TestWholesalerMCPIntegration:
         assert len(quotes) == 2
 
         dec = client.send_decision("H2", {"message_type": "ACCEPT_PROPOSAL"})
-        assert dec["status"] == "SUCCESS"
+        assert dec["status"] in ("ACCEPTED", "SUCCESS")
         assert dec["acknowledged"] is True
 
     def test_request_quotes_and_evaluate(self, temp_restaurant):
@@ -695,7 +695,123 @@ class TestWholesalerMCPIntegration:
         assert res["status"] == "SUCCESS"
         assert res["winning_wholesaler"] == "H1"
         assert res["auto_order_dispatched"] is True
+        # Zgodnie ze standardem wysyłana jest wyłącznie akceptacja do zwycięzcy (pozostali sprzedawcy nie otrzymują wiadomości)
+        assert len(res["dispatched_decisions"]) == 1
+        assert res["dispatched_decisions"][0]["wholesaler_id"] == "H1"
+        assert res["dispatched_decisions"][0]["status"] == "ACCEPTED"
+
+    def test_step4_fallback_when_winner_rejects_out_of_stock(self, temp_restaurant):
+        """
+        Krok 4 - Test Race Condition i Fallback:
+        H1 zaoferowała niższą cenę (40 PLN) niż H2 (50 PLN).
+        Jednak w Kroku 4, gdy restauracja wysyła accept_offer, H1 odrzuca (brak towaru).
+        Restauracja automatycznie przechodzi do kolejnej oferty (H2) i skutecznie dokonuje zakupu.
+        """
+        client = WholesalerMCPClient()
+        # Krok 1: Obie hurtownie mają towar podczas weryfikacji dostępności
+        client.set_mock_availability("H1", True)
+        client.set_mock_availability("H2", True)
+
+        # Krok 2: Oferty cenowe (H1 tańsza: 40 PLN vs H2: 50 PLN)
+        client.set_mock_response(
+            "H1",
+            {
+                "sender_id": "H1",
+                "receiver_id": "R1",
+                "message_type": "PROPOSAL",
+                "item": {"name": "passata", "quantity": 10, "price": 4.00},
+                "total_cost": 40.00,
+            },
+        )
+        client.set_mock_response(
+            "H2",
+            {
+                "sender_id": "H2",
+                "receiver_id": "R1",
+                "message_type": "PROPOSAL",
+                "item": {"name": "passata", "quantity": 10, "price": 5.00},
+                "total_cost": 50.00,
+            },
+        )
+
+        # Krok 4: H1 wyprzedała towar w międzyczasie i zwraca reject!
+        client.set_mock_decision_response(
+            "H1",
+            {
+                "sender_id": "H1",
+                "receiver_id": "R1",
+                "message_type": "REJECT_PROPOSAL",
+                "item": {"name": "passata", "quantity": 10},
+                "reason": "OUT_OF_STOCK",
+            },
+        )
+        # H2 nadal posiada towar i akceptuje zamówienie
+        client.set_mock_decision_response(
+            "H2",
+            {
+                "sender_id": "H2",
+                "receiver_id": "R1",
+                "message_type": "ACCEPT_PROPOSAL",
+                "item": {"name": "passata", "quantity": 10, "price": 5.00},
+                "total_cost": 50.00,
+            },
+        )
+
+        res = temp_restaurant.request_quotes_and_evaluate(
+            item_name="passata",
+            quantity=10,
+            wholesalers=["H1", "H2"],
+            auto_order=True,
+            mcp_client=client,
+        )
+
+        assert res["status"] == "SUCCESS"
+        # Ostatecznym zwycięzcą po fallbacku jest H2!
+        assert res["winning_wholesaler"] == "H2"
+        assert res["winning_total_cost"] == 50.00
+        assert res["auto_order_dispatched"] is True
+        assert res["order_status"] == "ACCEPTED"
+        # Sprawdzenie historii decyzji: 1 odrzucona przez H1, 1 zaakceptowana przez H2
         assert len(res["dispatched_decisions"]) == 2
+        assert res["dispatched_decisions"][0]["wholesaler_id"] == "H1"
+        assert res["dispatched_decisions"][0]["status"] == "REJECTED"
+        assert res["dispatched_decisions"][1]["wholesaler_id"] == "H2"
+        assert res["dispatched_decisions"][1]["status"] == "ACCEPTED"
+
+    def test_step4_all_sellers_reject_out_of_stock(self, temp_restaurant):
+        """
+        Krok 4: Gdy wszyscy dostępni oferenci odrzucą zamówienie z powodu braku towaru,
+        restauracja oznacza status ALL_SELLERS_REJECTED i nie składa błędnego zamówienia.
+        """
+        client = WholesalerMCPClient()
+        client.set_mock_availability("H1", True)
+        client.set_mock_availability("H2", True)
+
+        client.set_mock_response("H1", {
+            "sender_id": "H1", "receiver_id": "R1", "message_type": "PROPOSAL",
+            "item": {"name": "burrata", "quantity": 5, "price": 15.00}, "total_cost": 75.00,
+        })
+        client.set_mock_response("H2", {
+            "sender_id": "H2", "receiver_id": "R1", "message_type": "PROPOSAL",
+            "item": {"name": "burrata", "quantity": 5, "price": 16.00}, "total_cost": 80.00,
+        })
+
+        # Obie hurtownie odrzucają z powodu braku towaru w Kroku 4
+        client.set_mock_decision_response("H1", {"message_type": "REJECT_PROPOSAL", "reason": "OUT_OF_STOCK"})
+        client.set_mock_decision_response("H2", {"message_type": "REJECT_PROPOSAL", "reason": "OUT_OF_STOCK"})
+
+        res = temp_restaurant.request_quotes_and_evaluate(
+            item_name="burrata",
+            quantity=5,
+            wholesalers=["H1", "H2"],
+            auto_order=True,
+            mcp_client=client,
+        )
+
+        assert res["auto_order_dispatched"] is False
+        assert res["order_status"] == "ALL_SELLERS_REJECTED"
+        assert len(res["dispatched_decisions"]) == 2
+        assert all(d["status"] == "REJECTED" for d in res["dispatched_decisions"])
 
     def test_execute_tool_request_quotes_and_evaluate(self, temp_restaurant):
         """Verify tool execution dispatcher executes request_quotes_and_evaluate with mock."""

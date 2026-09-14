@@ -27,7 +27,7 @@ Restauracja nr 1 (`R1`):
    - Odbiera oferty `PROPOSAL` (`response-offer.json`).
    - **Deterministycznie wybiera ofertę o najniższym koszcie:**
      $$\min(\text{total\_cost})$$
-   - Generuje `ACCEPT_PROPOSAL` (`accept-offer.json`) dla wygranego oraz `REJECT_PROPOSAL` (`reject-offer.json`) dla pozostałych hurtowni.
+   - Generuje `ACCEPT_PROPOSAL` (`accept-offer.json`) wyłącznie dla wybranego sprzedawcy. W razie odrzucenia (`reject`) przez sprzedawcę z powodu braku towaru, automatycznie przechodzi do kolejnej oferty (fallback). Pozostali sprzedawcy nie otrzymują żadnych wiadomości (oferty milcząco wygasają).
    - Odbiera dostawę towaru na publicznym serwerze MCP, powiększa zapasy i rozlicza płatność z portfela (`receive_delivery`).
 5. **Mózg LLM (Groq API):** Steruje narzędziami biznesowymi przez natywną pętlę tool-calling SDK Groq.
 
@@ -141,7 +141,7 @@ python restaurant-1/agent/agent.py
 | Zapytanie ofertowe | `request-offer.json` | `CALL_FOR_PROPOSAL` | `{"name": str, "quantity": int}` |
 | Oferta cenowa | `response-offer.json` | `PROPOSAL` | `{"name": str, "quantity": int, "price": float}`, `total_cost` |
 | Akceptacja oferty | `accept-offer.json` | `ACCEPT_PROPOSAL` | `{"name": str, "quantity": int, "price": float}`, `total_cost` |
-| Odrzucenie oferty | `reject-offer.json` / `reject.json` | `REJECT_PROPOSAL` | `{"name": str, "quantity": int}` |
+| Odrzucenie zamówienia (brak towaru w Kroku 4) | `reject.json` | `REJECT_PROPOSAL` | `{"name": str, "quantity": int}` |
 | Dostawa towaru | `delivery.json` | `DELIVERY` | `{"name": str, "quantity": int, "price": float}`, `total_cost` |
 
 ---

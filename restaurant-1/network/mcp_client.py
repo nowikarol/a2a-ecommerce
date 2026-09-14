@@ -62,6 +62,7 @@ class WholesalerMCPClient:
         self.groq_client = groq_client
         self._mock_responses: Dict[str, Dict[str, Any]] = {}
         self._mock_availability: Dict[str, Dict[str, Any]] = {}
+        self._mock_decision_responses: Dict[str, Dict[str, Any]] = {}
 
     def _get_groq_client(self) -> Optional[Any]:
         """Returns initialized Groq client or None."""
@@ -160,10 +161,15 @@ class WholesalerMCPClient:
         else:
             self._mock_availability[wholesaler_id] = availability_data
 
+    def set_mock_decision_response(self, wholesaler_id: str, decision_data: Dict[str, Any]) -> None:
+        """Sets a mock response to an accept_offer/decision call for testing Step 4."""
+        self._mock_decision_responses[wholesaler_id] = decision_data
+
     def clear_mock_responses(self) -> None:
-        """Clears all registered mock responses and availability."""
+        """Clears all registered mock responses, availability, and decisions."""
         self._mock_responses.clear()
         self._mock_availability.clear()
+        self._mock_decision_responses.clear()
 
     async def check_availability_async(
         self, wholesaler_id: str, item_name: str, quantity: int
@@ -340,6 +346,7 @@ class WholesalerMCPClient:
                     tool_names = [t.name for t in tools_list.tools]
 
                     candidate_tools = [
+                        "request_offer",
                         "request_quote",
                         "handle_call_for_proposal",
                         "create_quote",
@@ -407,15 +414,36 @@ class WholesalerMCPClient:
         self, wholesaler_id: str, decision_msg: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Sends an ACCEPT_PROPOSAL or REJECT_PROPOSAL message to a wholesaler via MCP.
+        Sends an ACCEPT_PROPOSAL (via accept_offer / accept_proposal) or REJECT_PROPOSAL message to a wholesaler.
+        Parses seller response to verify if seller accepted the order or rejected it (due to out of stock).
         """
         url = self.endpoints.get(wholesaler_id)
         msg_type = decision_msg.get("message_type", "DECISION")
 
+        # 1. Explicit mock decision response (for testing step 4 accept vs reject)
+        if wholesaler_id in self._mock_decision_responses:
+            mock_res = self._mock_decision_responses[wholesaler_id]
+            is_reject = (
+                mock_res.get("message_type") == "REJECT_PROPOSAL"
+                or mock_res.get("status") in ("REJECTED", "ERROR", "OUT_OF_STOCK")
+                or mock_res.get("rejected") is True
+            )
+            status = "REJECTED" if is_reject else "ACCEPTED"
+            logger.info(f"[MCP_CLIENT] Returning mock decision response for {wholesaler_id}: {status}")
+            return {
+                "status": status,
+                "wholesaler_id": wholesaler_id,
+                "message_type": mock_res.get("message_type", "ACCEPT_PROPOSAL" if status == "ACCEPTED" else "REJECT_PROPOSAL"),
+                "response": mock_res,
+                "acknowledged": status == "ACCEPTED",
+                "reason": mock_res.get("reason", "OUT_OF_STOCK" if is_reject else None),
+            }
+
+        # 2. General mock fallback for test compatibility
         if wholesaler_id in self._mock_responses:
             logger.info(f"[MCP_CLIENT] Sent {msg_type} to mock {wholesaler_id}: {decision_msg}")
             return {
-                "status": "SUCCESS",
+                "status": "ACCEPTED" if msg_type == "ACCEPT_PROPOSAL" else "SUCCESS",
                 "wholesaler_id": wholesaler_id,
                 "message_type": msg_type,
                 "acknowledged": True,
@@ -428,14 +456,74 @@ class WholesalerMCPClient:
             async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
-                    tool_name = "accept_proposal" if msg_type == "ACCEPT_PROPOSAL" else "reject_proposal"
-                    await session.call_tool(tool_name, arguments={"decision_data": decision_msg})
-                    return {
-                        "status": "SUCCESS",
-                        "wholesaler_id": wholesaler_id,
-                        "message_type": msg_type,
-                        "acknowledged": True,
-                    }
+
+                    tools_list = await session.list_tools()
+                    tool_names = [t.name for t in tools_list.tools]
+
+                    if msg_type == "ACCEPT_PROPOSAL":
+                        candidate_tools = ["accept_offer", "accept_proposal", "confirm_order"]
+                    else:
+                        candidate_tools = ["reject_proposal", "reject_offer"]
+
+                    chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
+
+                    if not chosen_tool:
+                        logger.info(
+                            f"[MCP_CLIENT] Candidate tool names not found on {wholesaler_id} for {msg_type}. "
+                            "Checking tool descriptions on MCP server via LLM..."
+                        )
+                        chosen_tool = self._resolve_tool_with_llm(
+                            tools=tools_list.tools,
+                            task_intent=f"Złożenie zamówienia lub przekazanie decyzji zakupowej ({msg_type})",
+                        )
+
+                    if not chosen_tool:
+                        chosen_tool = "accept_offer" if msg_type == "ACCEPT_PROPOSAL" else "reject_proposal"
+
+                    result = await session.call_tool(chosen_tool, arguments={"decision_data": decision_msg})
+
+                    raw_text = (
+                        result.content[0].text
+                        if (result.content and hasattr(result.content[0], "text"))
+                        else (str(result.content[0]) if result.content else "")
+                    )
+
+                    resp_dict: Dict[str, Any] = {}
+                    if raw_text:
+                        try:
+                            resp_dict = json.loads(raw_text)
+                        except Exception:
+                            resp_dict = {"raw": raw_text}
+
+                    is_reject = (
+                        resp_dict.get("message_type") == "REJECT_PROPOSAL"
+                        or resp_dict.get("status") in ("REJECTED", "ERROR", "OUT_OF_STOCK")
+                        or resp_dict.get("rejected") is True
+                    )
+
+                    if is_reject:
+                        logger.warning(
+                            f"[MCP_CLIENT] Wholesaler {wholesaler_id} REJECTED accept_offer! Detail: {resp_dict}"
+                        )
+                        return {
+                            "status": "REJECTED",
+                            "wholesaler_id": wholesaler_id,
+                            "message_type": "REJECT_PROPOSAL",
+                            "response": resp_dict,
+                            "acknowledged": False,
+                            "reason": resp_dict.get("reason", "OUT_OF_STOCK"),
+                        }
+                    else:
+                        logger.info(
+                            f"[MCP_CLIENT] Wholesaler {wholesaler_id} accepted the order: {resp_dict}"
+                        )
+                        return {
+                            "status": "ACCEPTED",
+                            "wholesaler_id": wholesaler_id,
+                            "message_type": resp_dict.get("message_type", "ACCEPT_PROPOSAL"),
+                            "response": resp_dict,
+                            "acknowledged": True,
+                        }
         except Exception as e:
             logger.warning(f"[MCP_CLIENT] Could not send {msg_type} to {wholesaler_id}: {e}")
             return {

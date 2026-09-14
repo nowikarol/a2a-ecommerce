@@ -133,12 +133,13 @@ class AcceptProposalMessage(BaseCNPMessage):
 class RejectProposalMessage(BaseCNPMessage):
     """
     Message conforming to docs/schemas/reject-offer.json / reject.json (REJECT_PROPOSAL).
-    Issued by the restaurant to rejected wholesalers.
+    Issued by wholesaler when out of stock in Step 4, or for protocol rejection.
     """
-    sender_id: str = Field(default="R1", description="Restaurant 1 identifier")
-    receiver_id: str = Field(..., description="Rejected wholesaler identifier (e.g. H2)")
+    sender_id: str = Field(default="R1", description="Sender identifier (e.g. R1 or H1)")
+    receiver_id: str = Field(..., description="Receiver identifier (e.g. H2 or R1)")
     message_type: Literal["REJECT_PROPOSAL"] = "REJECT_PROPOSAL"
     item: Item = Field(..., description="Odrzucony artykuł")
+    reason: Optional[str] = Field(default=None, description="Powód odrzucenia (np. OUT_OF_STOCK)")
 
     @model_validator(mode="after")
     def strip_price(self) -> "RejectProposalMessage":
@@ -198,7 +199,7 @@ class ProposalEvaluationResult(BaseModel):
     unit_price: float
     decision_reason: str
     accept_proposal: Dict[str, Any]
-    reject_proposals: List[Dict[str, Any]]
+    reject_proposals: List[Dict[str, Any]] = Field(default_factory=list)
     all_evaluated_proposals: List[Dict[str, Any]]
     current_balance: Optional[float] = None
     currency: Optional[str] = "PLN"

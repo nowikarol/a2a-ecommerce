@@ -452,21 +452,9 @@ class RestaurantAgent:
             total_cost=winning_cost,
         )
 
+        # Zgodnie ze standardem protokołu A2A pozostali sprzedawcy nie otrzymują żadnej informacji
+        # (oferty milcząco wygasają), dlatego nie generujemy ani nie wysyłamy wiadomości REJECT_PROPOSAL.
         reject_msgs: List[RejectProposalMessage] = []
-        for prop in parsed_proposals:
-            if prop.sender_id != winner_id:
-                rej = RejectProposalMessage(
-                    sender_id=self.agent_id,
-                    receiver_id=prop.sender_id,
-                    item=Item(
-                        name=prop.item.name,
-                        quantity=prop.item.quantity,
-                    ),
-                )
-                reject_msgs.append(rej)
-                logger.info(
-                    f"[CNP:REJECT_PROPOSAL] Generated REJECT_PROPOSAL for '{prop.sender_id}' (cost was {prop.total_cost:.2f} {self.currency})"
-                )
 
         return {
             "status": "SUCCESS",
@@ -479,7 +467,7 @@ class RestaurantAgent:
             "is_affordable": is_affordable,
             "decision_reason": decision_reason,
             "accept_proposal": accept_msg.to_dict(),
-            "reject_proposals": [r.to_dict() for r in reject_msgs],
+            "reject_proposals": [],
             "all_evaluated_proposals": [p.to_dict() for p in parsed_proposals],
         }
 
@@ -613,21 +601,83 @@ class RestaurantAgent:
         if eval_result.get("status") != "SUCCESS":
             return eval_result
 
-        # Jeśli auto_order zaznaczony i oferta mieści się w budżecie, wysyłamy decyzje przez MCP
+        # Jeśli auto_order zaznaczony, wysyłamy zamówienie do zwycięzcy z obsługą Kroku 4 (fallback)
         dispatched_decisions = []
-        if auto_order and eval_result.get("is_affordable"):
-            winner_id = eval_result["winning_wholesaler"]
-            accept_msg = eval_result["accept_proposal"]
-            ack_accept = client.send_decision(winner_id, accept_msg)
-            dispatched_decisions.append(ack_accept)
+        order_confirmed = False
 
-            for rej_msg in eval_result.get("reject_proposals", []):
-                rej_id = rej_msg.get("receiver_id")
-                if rej_id:
-                    ack_rej = client.send_decision(rej_id, rej_msg)
-                    dispatched_decisions.append(ack_rej)
+        if auto_order:
+            # Sortujemy oferty rosnąco według total_cost (oraz ceny jednostkowej)
+            sorted_candidates = sorted(
+                eval_result.get("all_evaluated_proposals", []),
+                key=lambda p: (
+                    p.get("total_cost", float("inf")),
+                    p.get("item", {}).get("price", float("inf")) if p.get("item") else float("inf"),
+                ),
+            )
 
-        eval_result["auto_order_dispatched"] = auto_order and eval_result.get("is_affordable", False)
+            conn = self.get_conn()
+            try:
+                bal_row = conn.execute("SELECT balance FROM financial_account WHERE account_id = 'R1_WALLET'").fetchone()
+                current_balance = float(bal_row["balance"]) if bal_row else 0.0
+            finally:
+                conn.close()
+
+            for cand_prop in sorted_candidates:
+                cand_id = cand_prop.get("sender_id")
+                cand_cost = float(cand_prop.get("total_cost", 0.0))
+                cand_item = cand_prop.get("item", {})
+
+                if cand_cost > current_balance:
+                    logger.warning(
+                        f"[CNP:ORDER] Oferta hurtowni '{cand_id}' (koszt={cand_cost:.2f}) przekracza budżet ({current_balance:.2f}). Pomijanie..."
+                    )
+                    continue
+
+                accept_msg = AcceptProposalMessage(
+                    sender_id=self.agent_id,
+                    receiver_id=cand_id,
+                    item=Item(
+                        name=cand_item.get("name", item_name),
+                        quantity=cand_item.get("quantity", quantity),
+                        price=cand_item.get("price"),
+                    ),
+                    total_cost=cand_cost,
+                ).to_dict()
+
+                logger.info(f"[CNP:ACCEPT_OFFER] Składanie zamówienia w hurtowni '{cand_id}' (koszt: {cand_cost:.2f} {self.currency})...")
+                ack = client.send_decision(cand_id, accept_msg)
+                dispatched_decisions.append(ack)
+
+                # Krok 4: Weryfikacja odpowiedzi sprzedawcy
+                if ack.get("status") == "REJECTED" or ack.get("message_type") == "REJECT_PROPOSAL":
+                    reason = ack.get("reason", "OUT_OF_STOCK")
+                    logger.warning(
+                        f"[CNP:ORDER_REJECTED] Hurtownia '{cand_id}' odrzuciła zamówienie (powód: {reason}). "
+                        "Przechodzenie do kolejnej oferty (fallback)..."
+                    )
+                    continue
+                else:
+                    # Sukces - sprzedawca potwierdził akceptację
+                    logger.info(
+                        f"[CNP:ORDER_CONFIRMED] Hurtownia '{cand_id}' potwierdziła przyjęcie zamówienia. "
+                        "Pozostali sprzedawcy nie otrzymują żadnych powiadomień."
+                    )
+                    eval_result["winning_wholesaler"] = cand_id
+                    eval_result["winning_total_cost"] = cand_cost
+                    eval_result["unit_price"] = cand_item.get("price", 0.0)
+                    eval_result["accept_proposal"] = accept_msg
+                    eval_result["order_status"] = "ACCEPTED"
+                    order_confirmed = True
+                    break
+
+            if not order_confirmed and sorted_candidates:
+                logger.warning(
+                    f"[CNP:ORDER_FAILED] Wszystkie oferty zostały odrzucone przez hurtownie (brak towaru) lub przekroczyły budżet."
+                )
+                eval_result["order_status"] = "ALL_SELLERS_REJECTED"
+                eval_result["message"] = f"Wszyscy dostępni sprzedawcy odrzucili zamówienie na '{item_name}' (brak towaru w Kroku 4)."
+
+        eval_result["auto_order_dispatched"] = auto_order and order_confirmed
         eval_result["dispatched_decisions"] = dispatched_decisions
         eval_result["availability_check"] = avail_res.get("availability", {})
         eval_result["available_wholesalers"] = available_wholesalers
@@ -923,7 +973,7 @@ GROQ_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "evaluate_proposals",
-            "description": "Analizuje oferty PROPOSAL od hurtowni, wybiera zwycięzcę min(total_cost), sprawdza dostępny budżet w portfelu SQL i generuje ACCEPT_PROPOSAL oraz REJECT_PROPOSAL.",
+            "description": "Analizuje oferty PROPOSAL od hurtowni, wybiera zwycięzcę min(total_cost), sprawdza dostępny budżet w portfelu SQL i generuje ACCEPT_PROPOSAL dla zwycięzcy (pozostali sprzedawcy nie otrzymują odrzucenia - oferty milcząco wygasają).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1032,7 +1082,7 @@ GROQ_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "request_quotes_and_evaluate",
-            "description": "Dwuetapowy proces zakupowy: najpierw sprawdza dostępność wymaganej ilości surowca w hurtowniach (H1, H2), a jeśli produkt jest dostępny, wysyła zapytania cenowe wyłącznie do hurtowni posiadających towar, porównuje oferty regułą min(total_cost), sprawdza budżet w SQL i opcjonalnie składa zamówienie.",
+            "description": "5-etapowy proces zakupowy A2A: najpierw sprawdza dostępność wymaganej ilości surowca w hurtowniach (Krok 1), wysyła zapytania cenowe wyłącznie do dostępnych hurtowni (Krok 2), porównuje oferty regułą min(total_cost) i weryfikuje budżet (Krok 3), po czym składa zamówienie z automatycznym fallbackiem przy braku towaru u zwycięzcy (Krok 4). Pozostali sprzedawcy nie otrzymują odrzucenia.",
             "parameters": {
                 "type": "object",
                 "properties": {
