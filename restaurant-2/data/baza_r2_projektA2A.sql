@@ -7,7 +7,8 @@ CREATE TABLE magazyn (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nazwa_produktu TEXT UNIQUE NOT NULL,
     ilosc REAL NOT NULL,
-    jednostka TEXT NOT NULL
+    jednostka TEXT NOT NULL,
+    prog_bezpieczenstwa REAL DEFAULT 5.0
 );
 
 CREATE TABLE historia_transakcji (
@@ -33,18 +34,25 @@ CREATE TABLE skladniki_przepisow (
     FOREIGN KEY (id_przepisu) REFERENCES przepisy(id)
 );
 
+CREATE TABLE zadania_oczekujace (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nazwa_dania TEXT NOT NULL,
+    ilosc_porcji INTEGER NOT NULL,
+    status TEXT DEFAULT 'OCZEKUJE'
+);
+
 INSERT INTO konto (id, balans) VALUES (1, 15000.00);
 
-insert into magazyn (nazwa_produktu, ilosc, jednostka)
+INSERT INTO magazyn (nazwa_produktu, ilosc, jednostka, prog_bezpieczenstwa)
 VALUES
-    ('Flour', 20, 'kg'),
-    ('Passata', 10, 'kg'),
-    ('Mozzarella', 15, 'kg'),
-    ('Parmigiano reggiano', 5, 'kg'),
-    ('Salami', 7, 'kg'),
-    ('Lamb`s lettuce', 500, 'kg'),
-    ('Prosciutto crudo', 3, 'kg'),
-    ('Buffala', 2.4, 'kg');
+    ('Flour', 20, 'kg', 10.0),
+    ('Passata', 10, 'kg', 5.0),
+    ('Mozzarella', 15, 'kg', 5.0),
+    ('Parmigiano reggiano', 5, 'kg', 2.0),
+    ('Salami', 7, 'kg', 3.0),
+    ('Lamb`s lettuce', 500, 'kg', 10.0),
+    ('Prosciutto crudo', 3, 'kg', 3.0),
+    ('Buffala', 2.4, 'kg', 5.0);
 
 INSERT INTO przepisy (id, nazwa_dania) VALUES
     (1, 'Pizza z salami'),
