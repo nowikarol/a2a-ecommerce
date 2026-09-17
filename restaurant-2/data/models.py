@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 
 class Item(BaseModel): # Reprezentuje pojedynczy produkt w komunikacji.
@@ -13,10 +13,10 @@ class AvailabilityRequest(BaseModel): # Wiadomość wysyłana do hurtowni, by sp
     item: Item
 
     @model_validator(mode="after")
-    """Walidator uruchamiany po utworzeniu obiektu.
-    Gwarantuje, że zapytanie o dostępność NIGDY nie wyśle ceny (czyści pole price na None).
-    """
     def strip_price(self) -> "AvailabilityRequest":
+        """Walidator uruchamiany po utworzeniu obiektu.
+        Gwarantuje, że zapytanie o dostępność NIGDY nie wyśle ceny (czyści pole price na None).
+        """
         if self.item.price is not None:
             self.item.price = None
         return self

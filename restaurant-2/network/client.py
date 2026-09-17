@@ -1,10 +1,19 @@
 import asyncio
 import os
+import logging
+import sys
 from dotenv import load_dotenv
 from mcp.client.sse import sse_client
 from mcp.client.session import ClientSession
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stderr)]
+)
+logger = logging.getLogger("R2_CLIENT")
 
 load_dotenv() # Wczytuje zmienne środowiskowe z pliku .env do pamięci programu
 
@@ -40,7 +49,7 @@ async def dopasuj_narzedzie_llm(dostepne_narzedzia: list, intencja: str) -> str:
             HumanMessage(content=prompt)
         ])
         
-        wybor = odpowiedz.content.strip().strip("'\"` \n\t") # Oczyszczamy odpowiedź z niepotrzebnych znaków i białych spacji
+        wybor = odpowiedz.content.strip().strip("'\"` \n\t")
 
         # Upewniamy się, że narzędzie wybrane przez LLM faktycznie znajduje się na liście serwera
         for t in dostepne_narzedzia:
@@ -48,7 +57,7 @@ async def dopasuj_narzedzie_llm(dostepne_narzedzia: list, intencja: str) -> str:
                 return t.name
                 
     except Exception as e:
-        print(f"[LLM ROUTER] Błąd działania modelu dopasowującego: {e}")
+        logger.error(f"[LLM ROUTER] Błąd działania modelu dopasowującego: {e}")
         
     return None
 
@@ -72,7 +81,7 @@ async def wywolaj_zdalne_narzedzie(url: str, domyslna_nazwa: str, intencja: str,
                 if domyslna_nazwa in nazwy_narzedzi:
                     wybrane_narzedzie = domyslna_nazwa
                 else:
-                    # Narzędzia nie ma. Zlecamy analizę modelowi 
+                    # Narzędzia nie ma. Zlecamy analizę modelow
                     wybrane_narzedzie = await dopasuj_narzedzie_llm(lista_narzedzi.tools, intencja)
                 
                 # Jeśli po analizie nadal nie ma odpowiedniego narzędzia, rzucamy błąd
@@ -82,4 +91,5 @@ async def wywolaj_zdalne_narzedzie(url: str, domyslna_nazwa: str, intencja: str,
                 wynik = await session.call_tool(wybrane_narzedzie, arguments=argumenty) # Faktyczne wykonanie operacji na zdalnym serwerze
                 return wynik.content[0].text if wynik.content else "Brak odpowiedzi" # Zwracamy odpowiedź serwera, jeśli jest dostępna
     except Exception as e:
+        logger.warning(f"Błąd sieciowy z {url}: {e}")
         return f"Błąd sieciowy z {url}: {e}"

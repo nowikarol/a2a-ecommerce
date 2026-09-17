@@ -1,5 +1,14 @@
 import os
 import sqlite3
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stderr)]
+)
+logger = logging.getLogger("R2_TOOLS")
 
 db_file = 'data/restauracja_2.db'
 sql_file = 'data/baza_r2_projektA2A.sql'
@@ -10,7 +19,7 @@ def init_db():
     gdy fizyczny plik bazy (.db) jeszcze nie istnieje na dysku.
     """
     if not os.path.exists(db_file):
-        print("[BAZA]: Nie znaleziono pliku bazy. Tworzy się nowa...")
+        logger.info("[BAZA]: Nie znaleziono pliku bazy. Tworzy się nowa...")
         if os.path.exists(sql_file):
             conn = sqlite3.connect(db_file, timeout=10.0)
             cursor = conn.cursor()
@@ -23,8 +32,8 @@ def init_db():
                 cursor.executescript(file.read()) # executescript pozwala wykonać cały plik SQL na raz
             conn.commit()
             conn.close()
-            print("[BAZA]: Baza danych zainicjalizowana pomyślnie z pliku SQL.")
+            logger.info("[BAZA]: Baza danych zainicjalizowana pomyślnie z pliku SQL.")
         else:
-            print(f"[BAZA]: Błąd! Nie znaleziono pliku schematu: {sql_file}")
+            logger.error(f"[BAZA]: Błąd! Nie znaleziono pliku schematu: {sql_file}")
     else:
-        print("[BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.")
+        logger.info("[BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.")
