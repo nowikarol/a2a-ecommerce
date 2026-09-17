@@ -18,7 +18,7 @@ def get_product(item: str):
         cursor.execute(
             """
             SELECT name, quantity, price
-            FROM warehouse WHERE name =%s
+            FROM warehouse2 WHERE name =%s
             """,
             (item,),
         )
