@@ -1,313 +1,187 @@
 # Warehouse 1 (H1) — Agent Hurtowni
 
-Moduł obsługujący **Agenta Hurtowni (H1)** w systemie e-commerce **A2A**.
+**Warehouse 1 (H1)** to agent hurtowni w systemie e-commerce opartym na komunikacji **A2A (Agent-to-Agent)**.
 
-Aplikacja udostępnia hybrydowy interfejs:
+H1 pełni dwie role:
 
-* **FastMCP (SSE)** — publiczny protokół komunikacji agentowej A2A,
-* **REST API (FastAPI)** — wewnętrzne operacje handlowe oraz zarządzanie magazynem.
+* **Sprzedawcy** — obsługuje klientów, przygotowuje oferty i realizuje sprzedaż.
+* **Kupującego** — pozyskuje towary od Producenta (F1) i przyjmuje dostawy.
+
+Aplikacja udostępnia dwa interfejsy:
+
+* **FastMCP (SSE)** — publiczne narzędzia wykorzystywane w komunikacji A2A,
+* **REST API (FastAPI)** — operacje wewnętrzne, finanse, magazyn oraz zakupy u Producenta.
+
+Komunikacja handlowa wykorzystuje mechanizmy **Contract Net Protocol (CNP)**, m.in. `CALL_FOR_PROPOSAL`, `PROPOSAL`, `ACCEPT_PROPOSAL` i `REJECT_PROPOSAL`.
 
 ---
 
-## 🏗️ Architektura projektu
-
+## 🏗️ Architektura
 
 ```text
 warehouse-1/
 │
-├── main.py                  # Integrator FastAPI i FastMCP
-├── README.md                # Dokumentacja modułu
+├── main.py                  # FastAPI + FastMCP
+├── README.md
 │
-├── data/                    # Warstwa danych (SQLite + Pydantic)
-│   ├── models.py            # Modele Pydantic (TradeMessage, Item)
-│   ├── sql_functions.py     # Operacje bazodanowe 
-│   └── warehouse1.db        # Baza danych SQLite
+├── data/
+│   ├── models.py            # Modele Pydantic
+│   ├── sql_functions.py     # Operacje SQLite
+│   └── warehouse.db         # Baza danych
 │
-└── handlers/                # Warstwa logiki biznesowej
-    ├── mcp_tools.py         # Publiczne kontrakty A2A (narzędzia MCP)
-    └── internal_ops.py      # Wewnętrzne operacje handlowe
-                               # (zakupy u Producenta)
+└── handlers/
+    ├── mcp_tools.py         # Publiczne narzędzia A2A / MCP
+    └── internal_ops.py      # Zakupy u Producenta
 ```
 
----
-
-## ⚙️ Opis modułów i funkcji
-
-### 1. Warstwa danych — `data/`
-
-#### `data/models.py`
-
-Zawiera modele **Pydantic** wykorzystywane do walidacji danych przesyłanych w komunikacji A2A.
-
-**`Item`**
-
-Reprezentuje pojedynczy produkt:
-
-| Pole       | Typ     | Opis             |
-| ---------- | ------- | ---------------- |
-| `name`     | `str`   | Nazwa produktu   |
-| `quantity` | `int`   | Liczba sztuk     |
-| `price`    | `float` | Cena jednostkowa |
-
-**`TradeMessage`**
-
-Uniwersalny model koperty komunikacyjnej A2A zawierający m.in.:
-
-* `sender_id` — identyfikator nadawcy,
-* `receiver_id` — identyfikator odbiorcy,
-* `message_type` — typ komunikatu,
-* `item` — informacje o produkcie,
-* `total_cost` — całkowity koszt transakcji.
+| Moduł             | Odpowiedzialność                             |
+| ----------------- | -------------------------------------------- |
+| `main.py`         | Integracja FastAPI/FastMCP i endpointy REST  |
+| `data/`           | Modele, magazyn, konto i historia transakcji |
+| `mcp_tools.py`    | Publiczna logika biznesowa A2A               |
+| `internal_ops.py` | Komunikacja z Producentem                    |
 
 ---
 
-#### `data/sql_functions.py`
+## ⚙️ Główne funkcje
 
-Moduł odpowiedzialny za bezpośrednią komunikację z bazą **SQLite** oraz wykonywanie operacji CRUD.
+### `data/models.py`
 
-**`get_connection()`**
+Zawiera modele Pydantic:
 
-Tworzy i zwraca połączenie z bazą danych z wykorzystaniem `sqlite3.Row`, umożliwiającego dostęp do kolumn po nazwach.
+* **`Item`** — produkt (`name`, `quantity`, `unit`, `price`),
+* **`TradeMessage`** — koperta komunikacyjna A2A zawierająca nadawcę, odbiorcę, typ komunikatu, produkt i dane transakcji.
 
-**`init_db(products_list)`**
-
-* tworzy tabelę `products`,
-* inicjalizuje bazę początkowym cennikiem,
-* wykonuje seedowanie danych przy pierwszym uruchomieniu aplikacji.
-
-**`db_get_product(item_name: str)`**
-
-Pobiera informacje o:
-
-* cenie jednostkowej produktu,
-* aktualnym stanie magazynowym.
-
-**`db_update_stock(item_name: str, quantity_change: int, operation: Literal["add", "subtract"])`**
-
-Aktualizuje stan magazynowy:
-
-* `add` — zwiększa stan magazynowy, np. po dostawie od Producenta,
-* `subtract` — zmniejsza stan magazynowy, np. po sprzedaży.
-
----
-
-### 2. Warstwa logiki handlowej — `handlers/`
-
-#### `handlers/mcp_tools.py`
-
-Moduł definiuje narzędzia udostępniane zewnętrznym agentom za pośrednictwem **FastMCP**.
-
-Rejestracja narzędzi odbywa się poprzez:
-
-```python
-register_mcp_tools
-```
-
-#### `check_availability(item_name, quantity)`
-
-Sprawdza, czy w magazynie znajduje się żądana ilość danego produktu.
-
-Zwraca informację o dostępności towaru.
-
-#### `get_price_proposal(sender_id, item_name, quantity)`
-
-Obsługuje zapytanie:
+Obsługiwane komunikaty:
 
 ```text
 CALL_FOR_PROPOSAL
-```
-
-Jeżeli produkt jest dostępny:
-
-1. pobiera jego cenę,
-2. oblicza całkowitą wartość zamówienia,
-3. generuje komunikat `PROPOSAL`.
-
-Jeżeli produkt jest niedostępny, zwracany jest:
-
-```text
-REJECT_REQUEST
-```
-
-#### `finalize_order(sender_id, item_name, quantity, total_cost)`
-
-Obsługuje:
-
-```text
+PROPOSAL
 ACCEPT_PROPOSAL
-```
-
-Po zaakceptowaniu oferty:
-
-1. aktualizuje stan magazynowy,
-2. odejmuje zamówioną ilość produktu,
-3. generuje komunikat `DELIVERY`.
-
----
-
-### 3. Operacje wewnętrzne — `handlers/internal_ops.py`
-
-Moduł obsługuje relację zakupową **Hurtownia → Producent (F1)**.
-
-#### `request_offer(agent_id, producer_url, item_name, quantity)`
-
-Wysyła za pomocą klienta HTTP zapytanie ofertowe do serwera Producenta:
-
-```text
-CALL_FOR_PROPOSAL
-```
-
-#### `accept_offer(agent_id, producer_url, item_name, quantity, price)`
-
-Wysyła do Producenta akceptację otrzymanej oferty:
-
-```text
-ACCEPT_PROPOSAL
-```
-
-Po otrzymaniu potwierdzenia:
-
-```text
+REJECT_PROPOSAL
+AVAILABILITY_REQUEST
+AVAILABILITY_RESPONSE
 DELIVERY
 ```
 
-automatycznie aktualizuje stan magazynowy poprzez:
+### `data/sql_functions.py`
 
-```python
-db_update_stock(..., operation="add")
-```
+Warstwa dostępu do SQLite odpowiedzialna za:
+
+* inicjalizację bazy i danych początkowych,
+* zarządzanie stanem magazynowym,
+* obsługę salda hurtowni,
+* rejestrowanie transakcji,
+* pobieranie historii operacji.
+
+Domyślne saldo początkowe: **10 000 PLN**.
+
+### `handlers/mcp_tools.py`
+
+Publiczne narzędzia dostępne dla agentów:
+
+| Narzędzie                   | Funkcja                                 |
+| --------------------------- | --------------------------------------- |
+| `get_balance()`             | Pobiera saldo hurtowni                  |
+| `get_transaction_history()` | Pobiera historię transakcji             |
+| `check_availability(...)`   | Sprawdza dostępność produktu            |
+| `request_offer(...)`        | Obsługuje `CALL_FOR_PROPOSAL`           |
+| `accept_offer(...)`         | Realizuje sprzedaż po `ACCEPT_PROPOSAL` |
+| `receive_delivery(...)`     | Przyjmuje dostawę od Producenta         |
+
+### `handlers/internal_ops.py`
+
+Wewnętrzna komunikacja z Producentem:
+
+* `request_offer(...)` — wysyła `CALL_FOR_PROPOSAL`,
+* `accept_offer(...)` — wysyła `ACCEPT_PROPOSAL` i obsługuje `DELIVERY`.
 
 ---
 
-## 🚀 Główny integrator — `main.py`
+## 🌐 REST API
 
-Plik `main.py` integruje serwer **FastAPI** z zasobami **FastMCP**.
+| Metoda | Endpoint                 | Opis                                 |
+| ------ | ------------------------ | ------------------------------------ |
+| `GET`  | `/products`              | Katalog produktów i stany magazynowe |
+| `GET`  | `/finance/balance`       | Aktualne saldo                       |
+| `GET`  | `/finance/transactions`  | Historia transakcji                  |
+| `POST` | `/a2a/message`           | Obsługa komunikatów A2A              |
+| `POST` | `/a2a/buy/request-offer` | Zapytanie ofertowe do Producenta     |
+| `POST` | `/a2a/buy/accept-offer`  | Akceptacja oferty Producenta         |
 
-### Rejestracja MCP
+### FastMCP
 
-Endpoint SSE dla komunikacji MCP jest dostępny pod:
+Narzędzia agentowe są dostępne przez endpoint:
 
 ```text
 /mcp
 ```
 
-### `GET /products`
+Transport: **SSE (Server-Sent Events)**.
 
-Zwraca pełny katalog produktów znajdujących się w bazie danych wraz z:
+---
 
-* nazwą produktu,
-* dostępną ilością,
-* ceną.
+## 📑 Protokół A2A / CNP
 
-### `POST /a2a/message`
+| Zdarzenie               | Otrzymany komunikat    | Odpowiedź                               |
+| ----------------------- | ---------------------- | --------------------------------------- |
+| Sprawdzenie dostępności | `AVAILABILITY_REQUEST` | `AVAILABILITY_RESPONSE`                 |
+| Zapytanie ofertowe      | `CALL_FOR_PROPOSAL`    | `PROPOSAL` / `REJECT_PROPOSAL`          |
+| Akceptacja oferty       | `ACCEPT_PROPOSAL`      | `ACCEPT_PROPOSAL` / `REJECT_PROPOSAL`   |
+| Odrzucenie oferty       | `REJECT_PROPOSAL`      | `REJECTED`                              |
+| Przyjęcie dostawy       | `DELIVERY`             | `DELIVERY_RECEIVED` / `DELIVERY_FAILED` |
 
-Główny punkt wejścia dla protokołu handlowego **A2A**.
+---
 
-Endpoint:
+## 🔄 Przepływ transakcji
 
-1. odbiera obiekt `TradeMessage`,
-2. analizuje typ komunikatu,
-3. wywołuje odpowiednie narzędzie MCP za pomocą:
-
-```python
-await mcp.call_tool(...)
-```
-
-4. zwraca sparsowany JSON.
-
-### `POST /a2a/buy/request-offer`
-
-Dedykowany endpoint REST uruchamiający proces zakupu towaru od Producenta.
-
-Odpowiada za wysłanie zapytania ofertowego:
+### Sprzedaż klientowi
 
 ```text
-CALL_FOR_PROPOSAL
+Klient (R1)                         Warehouse (H1)
+    │                                      │
+    │──── CALL_FOR_PROPOSAL ─────────────►│
+    │◄────────── PROPOSAL ────────────────│
+    │                                      │
+    │──── ACCEPT_PROPOSAL ───────────────►│
+    │                                      │
+    │                         stock -= quantity
+    │                         balance += total_cost
+    │                         + SALE
+    │                                      │
+    │◄──── ACCEPT_PROPOSAL (Ack) ─────────│
 ```
 
-### `POST /a2a/buy/accept-offer`
-
-Endpoint REST służący do finalizacji zakupu towaru od Producenta.
-
-Wysyła:
+### Zakup od Producenta
 
 ```text
-ACCEPT_PROPOSAL
+Warehouse (H1)                    Producent (F1)
+      │                                  │
+      │──── CALL_FOR_PROPOSAL ─────────►│
+      │◄────────── PROPOSAL ────────────│
+      │                                  │
+      │──── ACCEPT_PROPOSAL ───────────►│
+      │◄────────── DELIVERY ────────────│
+      │                                  │
+      │  balance -= total_cost           │
+      │  stock += quantity                │
+      │  + PROCUREMENT_PAYMENT            │
 ```
 
 ---
 
-## 📑 Protokół komunikacji A2A / MCP
+## 💰 Model finansowy
 
-Hurtownia realizuje komunikację z innymi agentami zgodnie z poniższym schematem:
-
-| Zdarzenie A2A      | Narzędzie / Endpoint | Wywoływany typ komunikatu | Zwracany typ komunikatu             |
-| ------------------ | -------------------- | ------------------------- | ----------------------------------- |
-| Zapytanie o cenę   | `get_price_proposal` | `CALL_FOR_PROPOSAL`       | `PROPOSAL` / `REJECT_REQUEST`       |
-| Zakup towaru       | `finalize_order`     | `ACCEPT_PROPOSAL`         | `DELIVERY`                          |
-| Odmowa oferty      | `handle_message`     | `REJECT_PROPOSAL`         | `REJECTED`                          |
-| Zakup u Producenta | `request_offer`      | `CALL_FOR_PROPOSAL`       | `PROPOSAL` *(z serwera Producenta)* |
-
----
-
-## 🔄 Przepływ przykładowej transakcji
-
-### Sprzedaż towaru z Hurtowni
+Każda transakcja wpływa na saldo i jest zapisywana w historii:
 
 ```text
-Agent Klienta
-     │
-     │ CALL_FOR_PROPOSAL
-     ▼
-┌───────────────┐
-│ Warehouse 1   │
-│     (H1)      │
-└───────┬───────┘
-        │
-        │ check_availability()
-        │
-        ▼
-   Dostępny?
-    /     \
-  TAK      NIE
-   │        │
-   │        └──────► REJECT_REQUEST
-   │
-   │ get_price_proposal()
-   ▼
- PROPOSAL
-   │
-   │ ACCEPT_PROPOSAL
-   ▼
-finalize_order()
-   │
-   │ db_update_stock(-quantity)
-   ▼
- DELIVERY
+Sprzedaż              → balance += total_cost
+Zakup od Producenta   → balance -= total_cost
 ```
 
-### Zakup towaru od Producenta
+System sprawdza:
 
-```text
-Warehouse 1 (H1)
-       │
-       │ CALL_FOR_PROPOSAL
-       ▼
-   Producent (F1)
-       │
-       │ PROPOSAL
-       ▼
-Warehouse 1 (H1)
-       │
-       │ ACCEPT_PROPOSAL
-       ▼
-   Producent (F1)
-       │
-       │ DELIVERY
-       ▼
-Warehouse 1 (H1)
-       │
-       │ db_update_stock(+quantity)
-       ▼
-   Magazyn uzupełniony
-```
+* dostępność produktu przed sprzedażą,
+* wystarczające środki przed zakupem,
+* poprawność aktualizacji magazynu i finansów.
+
