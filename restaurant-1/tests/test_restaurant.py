@@ -31,6 +31,95 @@ from agent.agent import RestaurantBrain, SYSTEM_PROMPT
 from network.mcp_client import WholesalerMCPClient, default_mcp_client
 
 
+class MockWholesalerMCPClient(WholesalerMCPClient):
+    """Isolated test mock for WholesalerMCPClient used within tests."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._mock_responses: Dict[str, Dict[str, Any]] = {}
+        self._mock_availability: Dict[str, Dict[str, Any]] = {}
+        self._mock_decision_responses: Dict[str, Dict[str, Any]] = {}
+
+    def set_mock_response(self, wholesaler_id: str, proposal: Dict[str, Any]) -> None:
+        self._mock_responses[wholesaler_id] = proposal
+
+    def set_mock_availability(self, wholesaler_id: str, availability_data: Any) -> None:
+        if isinstance(availability_data, bool):
+            self._mock_availability[wholesaler_id] = {
+                "sender_id": wholesaler_id,
+                "receiver_id": "R1",
+                "message_type": "AVAILABILITY_RESPONSE",
+                "item": {"name": "mock", "quantity": 1},
+                "is_available": availability_data,
+                "available_quantity": 999 if availability_data else 0,
+            }
+        else:
+            self._mock_availability[wholesaler_id] = availability_data
+
+    def set_mock_decision_response(self, wholesaler_id: str, decision_data: Dict[str, Any]) -> None:
+        self._mock_decision_responses[wholesaler_id] = decision_data
+
+    def clear_mock_responses(self) -> None:
+        self._mock_responses.clear()
+        self._mock_availability.clear()
+        self._mock_decision_responses.clear()
+
+    async def check_availability_async(
+        self, wholesaler_id: str, item_name: str, quantity: int
+    ) -> Dict[str, Any]:
+        if wholesaler_id in self._mock_availability:
+            mock = dict(self._mock_availability[wholesaler_id])
+            mock.setdefault("item", {"name": item_name, "quantity": quantity})
+            return mock
+        if wholesaler_id in self._mock_responses:
+            return {
+                "sender_id": wholesaler_id,
+                "receiver_id": "R1",
+                "message_type": "AVAILABILITY_RESPONSE",
+                "item": {"name": item_name, "quantity": quantity},
+                "is_available": True,
+                "available_quantity": 9999,
+            }
+        return await super().check_availability_async(wholesaler_id, item_name, quantity)
+
+    async def fetch_quote_async(
+        self, wholesaler_id: str, item_name: str, quantity: int
+    ) -> Optional[Dict[str, Any]]:
+        if wholesaler_id in self._mock_responses:
+            return self._mock_responses[wholesaler_id]
+        return await super().fetch_quote_async(wholesaler_id, item_name, quantity)
+
+    async def send_decision_async(
+        self, wholesaler_id: str, decision_msg: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if wholesaler_id in self._mock_decision_responses:
+            mock_res = self._mock_decision_responses[wholesaler_id]
+            is_reject = (
+                mock_res.get("message_type") == "REJECT_PROPOSAL"
+                or mock_res.get("status") in ("REJECTED", "ERROR", "OUT_OF_STOCK")
+                or mock_res.get("rejected") is True
+            )
+            status = "REJECTED" if is_reject else "ACCEPTED"
+            return {
+                "status": status,
+                "wholesaler_id": wholesaler_id,
+                "message_type": mock_res.get("message_type", "ACCEPT_PROPOSAL" if status == "ACCEPTED" else "REJECT_PROPOSAL"),
+                "response": mock_res,
+                "acknowledged": status == "ACCEPTED",
+                "reason": mock_res.get("reason", "OUT_OF_STOCK" if is_reject else None),
+            }
+        if wholesaler_id in self._mock_responses:
+            msg_type = decision_msg.get("message_type", "DECISION")
+            return {
+                "status": "ACCEPTED" if msg_type == "ACCEPT_PROPOSAL" else "SUCCESS",
+                "wholesaler_id": wholesaler_id,
+                "message_type": msg_type,
+                "acknowledged": True,
+            }
+        return await super().send_decision_async(wholesaler_id, decision_msg)
+
+
+
 @pytest.fixture
 def temp_restaurant(tmp_path):
     """Creates an isolated restaurant agent with a fresh temporary SQLite database."""
@@ -452,7 +541,7 @@ class TestGroqToolsAndBrain:
         assert history[4]["role"] == "assistant"
         assert "5000.00 PLN" in history[4]["content"]
 
-    def test_restaurant_brain_mcp_quote_tool_calling_mocked(self, temp_restaurant):
+    def test_restaurant_brain_mcp_quote_tool_calling_mocked(self, temp_restaurant, monkeypatch):
         """Verify RestaurantBrain can invoke request_quotes_and_evaluate and consume its result."""
         mock_client = MagicMock()
 
@@ -478,7 +567,10 @@ class TestGroqToolsAndBrain:
         brain = RestaurantBrain(api_key="mock_key_123", agent_backend=temp_restaurant)
         brain.client = mock_client
 
-        default_mcp_client.set_mock_response(
+        mock_mcp = MockWholesalerMCPClient()
+        monkeypatch.setattr("agent.tools.default_mcp_client", mock_mcp)
+
+        mock_mcp.set_mock_response(
             "H1",
             {
                 "sender_id": "H1",
@@ -488,7 +580,7 @@ class TestGroqToolsAndBrain:
                 "total_cost": 185.00,
             },
         )
-        default_mcp_client.set_mock_response(
+        mock_mcp.set_mock_response(
             "H2",
             {
                 "sender_id": "H2",
@@ -498,20 +590,17 @@ class TestGroqToolsAndBrain:
                 "total_cost": 175.00,
             },
         )
-        try:
-            history = brain.run_conversation([
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": "Sprawdź oferty na 10 sztuk burraty."},
-            ])
+        history = brain.run_conversation([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Sprawdź oferty na 10 sztuk burraty."},
+        ])
 
-            assert len(history) == 5
-            assert history[2]["tool_calls"][0]["function"]["name"] == "request_quotes_and_evaluate"
-            tool_content = json.loads(history[3]["content"])
-            assert tool_content["status"] == "SUCCESS"
-            assert tool_content["winning_wholesaler"] in ("H1", "H2")
-            assert "175.00 PLN" in history[4]["content"]
-        finally:
-            default_mcp_client.clear_mock_responses()
+        assert len(history) == 5
+        assert history[2]["tool_calls"][0]["function"]["name"] == "request_quotes_and_evaluate"
+        tool_content = json.loads(history[3]["content"])
+        assert tool_content["status"] == "SUCCESS"
+        assert tool_content["winning_wholesaler"] in ("H1", "H2")
+        assert "175.00 PLN" in history[4]["content"]
 
 
 def test_mcp_server_tools_registered():
@@ -597,7 +686,7 @@ class TestWholesalerMCPIntegration:
         assert quotes == []
 
     def test_wholesaler_mcp_client_custom_mock(self):
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         mock_h1 = {
             "sender_id": "H1",
             "receiver_id": "R1",
@@ -624,7 +713,7 @@ class TestWholesalerMCPIntegration:
 
     def test_request_quotes_and_evaluate(self, temp_restaurant):
         """Verify request_quotes_and_evaluate selects min(total_cost) winner via MCP client."""
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         client.set_mock_response(
             "H1",
             {
@@ -662,7 +751,7 @@ class TestWholesalerMCPIntegration:
 
     def test_request_quotes_and_evaluate_auto_order(self, temp_restaurant):
         """Verify auto_order dispatches ACCEPT to winner and REJECT to loser."""
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         client.set_mock_response(
             "H1",
             {
@@ -707,7 +796,7 @@ class TestWholesalerMCPIntegration:
         Jednak w Kroku 4, gdy restauracja wysyła accept_offer, H1 odrzuca (brak towaru).
         Restauracja automatycznie przechodzi do kolejnej oferty (H2) i skutecznie dokonuje zakupu.
         """
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         # Krok 1: Obie hurtownie mają towar podczas weryfikacji dostępności
         client.set_mock_availability("H1", True)
         client.set_mock_availability("H2", True)
@@ -783,7 +872,7 @@ class TestWholesalerMCPIntegration:
         Krok 4: Gdy wszyscy dostępni oferenci odrzucą zamówienie z powodu braku towaru,
         restauracja oznacza status ALL_SELLERS_REJECTED i nie składa błędnego zamówienia.
         """
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         client.set_mock_availability("H1", True)
         client.set_mock_availability("H2", True)
 
@@ -813,9 +902,12 @@ class TestWholesalerMCPIntegration:
         assert len(res["dispatched_decisions"]) == 2
         assert all(d["status"] == "REJECTED" for d in res["dispatched_decisions"])
 
-    def test_execute_tool_request_quotes_and_evaluate(self, temp_restaurant):
+    def test_execute_tool_request_quotes_and_evaluate(self, temp_restaurant, monkeypatch):
         """Verify tool execution dispatcher executes request_quotes_and_evaluate with mock."""
-        default_mcp_client.set_mock_response(
+        mock_mcp = MockWholesalerMCPClient()
+        monkeypatch.setattr("agent.tools.default_mcp_client", mock_mcp)
+
+        mock_mcp.set_mock_response(
             "H1",
             {
                 "sender_id": "H1",
@@ -825,24 +917,21 @@ class TestWholesalerMCPIntegration:
                 "total_cost": 90.00,
             },
         )
-        try:
-            args_json = json.dumps({
-                "item_name": "burrata",
-                "quantity": 5,
-                "wholesalers": ["H1"],
-                "auto_order": False,
-            })
-            raw_res = execute_tool(
-                name="request_quotes_and_evaluate",
-                arguments=args_json,
-                agent=temp_restaurant,
-            )
-            res = json.loads(raw_res)
-            assert res["status"] == "SUCCESS"
-            assert res["winning_wholesaler"] == "H1"
-            assert res["winning_total_cost"] == 90.00
-        finally:
-            default_mcp_client.clear_mock_responses()
+        args_json = json.dumps({
+            "item_name": "burrata",
+            "quantity": 5,
+            "wholesalers": ["H1"],
+            "auto_order": False,
+        })
+        raw_res = execute_tool(
+            name="request_quotes_and_evaluate",
+            arguments=args_json,
+            agent=temp_restaurant,
+        )
+        res = json.loads(raw_res)
+        assert res["status"] == "SUCCESS"
+        assert res["winning_wholesaler"] == "H1"
+        assert res["winning_total_cost"] == 90.00
 
     def test_wholesaler_mcp_client_check_availability_offline(self):
         """Verify unreachable wholesaler returns is_available=False without artificial fallback."""
@@ -855,7 +944,7 @@ class TestWholesalerMCPIntegration:
 
     def test_wholesaler_mcp_client_check_availability_mock(self):
         """Verify custom mock availability works."""
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         client.set_mock_availability("H1", True)
         client.set_mock_availability("H2", False)
 
@@ -865,7 +954,7 @@ class TestWholesalerMCPIntegration:
 
     def test_check_wholesaler_availability_agent_tool(self, temp_restaurant):
         """Verify RestaurantAgent.check_wholesaler_availability returns AVAILABLE or UNAVAILABLE."""
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         client.set_mock_availability("H1", True)
         client.set_mock_availability("H2", False)
 
@@ -891,7 +980,7 @@ class TestWholesalerMCPIntegration:
         Jeśli produkt w żądanej ilości jest niedostępny w hurtowniach,
         proces zakupowy zostaje wstrzymany i zapytania o ceny NIE są wysyłane.
         """
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         # Mock obu hurtowni jako brak towaru
         client.set_mock_availability("H1", False)
         client.set_mock_availability("H2", False)
@@ -915,7 +1004,7 @@ class TestWholesalerMCPIntegration:
         Jeśli hurtownia H1 ma towar, a H2 nie ma, zapytanie cenowe jest wysyłane
         WYŁĄCZNIE do hurtowni H1 (nawet jeśli H2 miałaby tańszą ofertę w cenniku).
         """
-        client = WholesalerMCPClient()
+        client = MockWholesalerMCPClient()
         client.set_mock_availability("H1", True)
         client.set_mock_availability("H2", False)
 
@@ -1062,6 +1151,172 @@ class TestWholesalerMCPIntegration:
         client = WholesalerMCPClient(groq_client=mock_groq)
         chosen = client._resolve_tool_with_llm(tools=tools, task_intent="dowolny cel")
         assert chosen is None
+
+
+class TestAutoReorderAndConversationalMemory:
+    """Tests verifying automated CNP reordering on stock depletion and conversation memory."""
+
+    def test_consume_ingredients_auto_reorder_below_threshold(self, temp_restaurant):
+        """Verify that when ingredient drops below safety threshold, auto_reorder triggers CNP purchase."""
+        client = MockWholesalerMCPClient()
+        client.set_mock_availability("H1", True)
+        client.set_mock_availability("H2", True)
+        client.set_mock_response(
+            "H1",
+            {
+                "sender_id": "H1",
+                "receiver_id": "R1",
+                "message_type": "PROPOSAL",
+                "item": {"name": "passata", "quantity": 36, "price": 4.50},
+                "total_cost": 162.00,
+            },
+        )
+        client.set_mock_response(
+            "H2",
+            {
+                "sender_id": "H2",
+                "receiver_id": "R1",
+                "message_type": "PROPOSAL",
+                "item": {"name": "passata", "quantity": 36, "price": 5.00},
+                "total_cost": 180.00,
+            },
+        )
+
+        # margherita_classica uses 3 passata. 12 * 3 = 36. Initial 50 -> 14 <= threshold (20)
+        res = temp_restaurant.consume_ingredients(
+            "margherita_classica",
+            12,
+            auto_reorder=True,
+            mcp_client=client,
+            wholesalers=["H1", "H2"],
+        )
+
+        assert res["status"] == "SUCCESS"
+        assert "auto_reorders" in res
+        assert len(res["auto_reorders"]) >= 1
+
+        reorder = next(r for r in res["auto_reorders"] if r["item_name"] == "passata")
+        assert reorder["reason"] == "SAFETY_THRESHOLD_BREACH"
+        assert reorder["reorder_result"]["status"] == "SUCCESS"
+        assert reorder["reorder_result"]["auto_order_dispatched"] is True
+        assert reorder["reorder_result"]["winning_wholesaler"] == "H1"
+        assert reorder["reorder_result"]["winning_total_cost"] == 162.00
+
+    def test_consume_ingredients_auto_reorder_shortage(self, temp_restaurant):
+        """Verify that when ingredient shortage occurs, auto_reorder triggers procurement for deficit."""
+        client = MockWholesalerMCPClient()
+        client.set_mock_availability("H1", True)
+        client.set_mock_response(
+            "H1",
+            {
+                "sender_id": "H1",
+                "receiver_id": "R1",
+                "message_type": "PROPOSAL",
+                "item": {"name": "salami", "quantity": 30, "price": 8.00},
+                "total_cost": 240.00,
+            },
+        )
+
+        # pizza_diavola uses 2 salami per dish. 20 dishes need 40 salami. Initial stock = 25 -> Shortage!
+        res = temp_restaurant.consume_ingredients(
+            "pizza_diavola",
+            20,
+            auto_reorder=True,
+            mcp_client=client,
+            wholesalers=["H1"],
+        )
+
+        assert res["status"] == "SHORTAGE"
+        assert "auto_reorders" in res
+        assert len(res["auto_reorders"]) >= 1
+
+        salami_order = next(r for r in res["auto_reorders"] if r["item_name"] == "salami")
+        assert salami_order["reason"] == "SHORTAGE"
+        assert salami_order["reorder_result"]["status"] == "SUCCESS"
+        assert salami_order["reorder_result"]["auto_order_dispatched"] is True
+        assert salami_order["reorder_result"]["winning_wholesaler"] == "H1"
+
+    def test_consume_ingredients_auto_reorder_disabled(self, temp_restaurant):
+        """Verify that when auto_reorder=False, no procurement order is dispatched."""
+        res = temp_restaurant.consume_ingredients(
+            "margherita_classica",
+            12,
+            auto_reorder=False,
+        )
+
+        assert res["status"] == "SUCCESS"
+        assert "auto_reorders" not in res
+        assert len(res["low_stock_warnings"]) >= 1
+        assert "passata" in [w["item_name"] for w in res["low_stock_warnings"]]
+
+    def test_restaurant_brain_conversational_memory_sliding_window(self, temp_restaurant):
+        """Verify RestaurantBrain maintains up to 4 recent messages and slides window correctly."""
+        mock_groq = MagicMock()
+
+        def make_reply(text):
+            m = MagicMock()
+            choice = MagicMock()
+            choice.message.content = text
+            choice.message.tool_calls = None
+            m.choices = [choice]
+            return m
+
+        mock_groq.chat.completions.create.side_effect = [
+            make_reply("Mamy 40 kg mozzarelli."),
+            make_reply("Do margherity potrzebujemy 2 kg sera."),
+            make_reply("Przygotowano 3 pizze margherita."),
+        ]
+
+        brain = RestaurantBrain(
+            api_key="mock_key_test",
+            agent_backend=temp_restaurant,
+            max_memory_messages=4,
+        )
+        brain.client = mock_groq
+
+        # Turn 1
+        reply1 = brain.ask("Ile mamy mozzarelli?")
+        assert reply1 == "Mamy 40 kg mozzarelli."
+        mem1 = brain.get_memory()
+        assert len(mem1) == 2
+        assert mem1[0] == {"role": "user", "content": "Ile mamy mozzarelli?"}
+        assert mem1[1] == {"role": "assistant", "content": "Mamy 40 kg mozzarelli."}
+
+        # Turn 2
+        reply2 = brain.ask("A ile sera idzie na margheritę?")
+        assert reply2 == "Do margherity potrzebujemy 2 kg sera."
+        mem2 = brain.get_memory()
+        assert len(mem2) == 4
+
+        # Turn 3 -> sliding window should drop Turn 1 and keep Turn 2 + Turn 3 (4 messages)
+        reply3 = brain.ask("To przygotuj 3 pizze")
+        assert reply3 == "Przygotowano 3 pizze margherita."
+        mem3 = brain.get_memory()
+        assert len(mem3) == 4
+        assert mem3[0] == {"role": "user", "content": "A ile sera idzie na margheritę?"}
+        assert mem3[1] == {"role": "assistant", "content": "Do margherity potrzebujemy 2 kg sera."}
+        assert mem3[2] == {"role": "user", "content": "To przygotuj 3 pizze"}
+        assert mem3[3] == {"role": "assistant", "content": "Przygotowano 3 pizze margherita."}
+
+    def test_restaurant_brain_clear_memory(self, temp_restaurant):
+        """Verify clear_memory empties the conversation memory."""
+        mock_groq = MagicMock()
+        choice = MagicMock()
+        choice.message.content = "Jasne!"
+        choice.message.tool_calls = None
+        mock_resp = MagicMock()
+        mock_resp.choices = [choice]
+        mock_groq.chat.completions.create.return_value = mock_resp
+
+        brain = RestaurantBrain(api_key="mock_key_test", agent_backend=temp_restaurant)
+        brain.client = mock_groq
+
+        brain.ask("Cześć!")
+        assert len(brain.get_memory()) == 2
+
+        brain.clear_memory()
+        assert brain.get_memory() == []
+
 
 
 

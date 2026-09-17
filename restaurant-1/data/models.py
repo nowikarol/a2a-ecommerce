@@ -132,7 +132,7 @@ class AcceptProposalMessage(BaseCNPMessage):
 
 class RejectProposalMessage(BaseCNPMessage):
     """
-    Message conforming to docs/schemas/reject-offer.json / reject.json (REJECT_PROPOSAL).
+    Message conforming to docs/schemas/json-schemas/reject.json (REJECT_PROPOSAL).
     Issued by wholesaler when out of stock in Step 4, or for protocol rejection.
     """
     sender_id: str = Field(default="R1", description="Sender identifier (e.g. R1 or H1)")

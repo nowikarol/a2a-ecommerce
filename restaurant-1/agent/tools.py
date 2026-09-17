@@ -28,7 +28,6 @@ from data.models import (
     DeliveryMessage,
     Item,
     ProposalMessage,
-    RejectProposalMessage,
 )
 from network.mcp_client import WholesalerMCPClient, default_mcp_client
 
@@ -226,13 +225,25 @@ class RestaurantAgent:
         finally:
             conn.close()
 
-    def consume_ingredients(self, dish_name: str, quantity: int = 1) -> Dict[str, Any]:
+    def consume_ingredients(
+        self,
+        dish_name: str,
+        quantity: int = 1,
+        auto_reorder: Optional[bool] = None,
+        wholesalers: Optional[List[str]] = None,
+        mcp_client: Optional[WholesalerMCPClient] = None,
+    ) -> Dict[str, Any]:
         """
         Deducts ingredients required for dish_name * quantity in an atomic SQL transaction.
         Returns shortage details if insufficient ingredients exist without modifying stock.
+        When auto_reorder is True (default from config), automatically initiates CNP procurement
+        and places orders for any ingredients falling on or below safety threshold or on shortage.
         """
         if quantity <= 0:
             return {"status": "ERROR", "message": f"Quantity must be positive, got {quantity}"}
+
+        should_auto_reorder = auto_reorder if auto_reorder is not None else config.AUTO_REORDER_ON_THRESHOLD
+        target_wholesalers = wholesalers or ["H1", "H2"]
 
         conn = self.get_conn()
         try:
@@ -299,13 +310,52 @@ class RestaurantAgent:
                 logger.warning(
                     f"[INVENTORY:SHORTAGE] Insufficient ingredients for {quantity}x '{dish_title}'. Shortages: {missing_names}"
                 )
-                return {
+
+                auto_reorders = []
+                if should_auto_reorder:
+                    for s in shortages:
+                        item_name = s["item_name"]
+                        needed_qty = s["suggested_procurement_quantity"]
+                        logger.info(
+                            f"[INVENTORY:AUTO_REORDER_SHORTAGE] Triggering procurement for shortage of '{item_name}' (needed: {needed_qty})..."
+                        )
+                        try:
+                            reorder_res = self.request_quotes_and_evaluate(
+                                item_name=item_name,
+                                quantity=needed_qty,
+                                wholesalers=target_wholesalers,
+                                auto_order=True,
+                                mcp_client=mcp_client,
+                            )
+                            auto_reorders.append(
+                                {
+                                    "item_name": item_name,
+                                    "quantity": needed_qty,
+                                    "reason": "SHORTAGE",
+                                    "reorder_result": reorder_res,
+                                }
+                            )
+                        except Exception as e:
+                            logger.error(f"[INVENTORY:AUTO_REORDER_ERROR] Failed to auto-reorder shortage '{item_name}': {e}")
+                            auto_reorders.append(
+                                {
+                                    "item_name": item_name,
+                                    "quantity": needed_qty,
+                                    "reason": "SHORTAGE",
+                                    "reorder_result": {"status": "ERROR", "message": str(e)},
+                                }
+                            )
+
+                shortage_res = {
                     "status": "SHORTAGE",
                     "dish_name": dish_title,
                     "quantity_requested": quantity,
                     "shortages": shortages,
                     "message": f"Cannot prepare {quantity}x '{dish_title}'. Insufficient ingredients: {missing_names}. Procurement required.",
                 }
+                if should_auto_reorder:
+                    shortage_res["auto_reorders"] = auto_reorders
+                return shortage_res
 
             # 3. Perform atomic deduction in SQL transaction
             warnings = []
@@ -344,7 +394,46 @@ class RestaurantAgent:
 
             logger.info(f"[INVENTORY:CONSUME] Consumed ingredients for {quantity}x '{dish_title}': {total_needed}")
 
-            return {
+            auto_reorders = []
+            if should_auto_reorder and warnings:
+                for w in warnings:
+                    item_name = w["item_name"]
+                    rem_qty = w["remaining_quantity"]
+                    thresh = w["safety_threshold"]
+                    reorder_qty = w["reorder_quantity"]
+                    order_qty = max(reorder_qty, (thresh - rem_qty) + reorder_qty)
+                    logger.info(
+                        f"[INVENTORY:AUTO_REORDER] Stock of '{item_name}' ({rem_qty}) <= safety threshold ({thresh}). "
+                        f"Auto-triggering procurement of {order_qty} units..."
+                    )
+                    try:
+                        reorder_res = self.request_quotes_and_evaluate(
+                            item_name=item_name,
+                            quantity=order_qty,
+                            wholesalers=target_wholesalers,
+                            auto_order=True,
+                            mcp_client=mcp_client,
+                        )
+                        auto_reorders.append(
+                            {
+                                "item_name": item_name,
+                                "quantity": order_qty,
+                                "reason": "SAFETY_THRESHOLD_BREACH",
+                                "reorder_result": reorder_res,
+                            }
+                        )
+                    except Exception as e:
+                        logger.error(f"[INVENTORY:AUTO_REORDER_ERROR] Failed to auto-reorder '{item_name}': {e}")
+                        auto_reorders.append(
+                            {
+                                "item_name": item_name,
+                                "quantity": order_qty,
+                                "reason": "SAFETY_THRESHOLD_BREACH",
+                                "reorder_result": {"status": "ERROR", "message": str(e)},
+                            }
+                        )
+
+            success_res = {
                 "status": "SUCCESS",
                 "dish_name": dish_title,
                 "quantity_prepared": quantity,
@@ -352,6 +441,9 @@ class RestaurantAgent:
                 "low_stock_warnings": warnings,
                 "remaining_inventory": remaining_inventory,
             }
+            if should_auto_reorder:
+                success_res["auto_reorders"] = auto_reorders
+            return success_res
         finally:
             conn.close()
 
@@ -384,7 +476,7 @@ class RestaurantAgent:
         """
         Deterministically selects winning offer with min(total_cost).
         Verifies wallet balance in SQL database and warns/flags if total_cost exceeds balance.
-        Generates 1x ACCEPT_PROPOSAL for winner and (N-1)x REJECT_PROPOSAL for other wholesalers.
+        Generates ACCEPT_PROPOSAL for the winning wholesaler (unselected offers silently expire without sending REJECT_PROPOSAL per A2A protocol).
         """
         if isinstance(proposals_list, str):
             proposals_data = json.loads(proposals_list)
@@ -454,7 +546,6 @@ class RestaurantAgent:
 
         # Zgodnie ze standardem protokołu A2A pozostali sprzedawcy nie otrzymują żadnej informacji
         # (oferty milcząco wygasają), dlatego nie generujemy ani nie wysyłamy wiadomości REJECT_PROPOSAL.
-        reject_msgs: List[RejectProposalMessage] = []
 
         return {
             "status": "SUCCESS",
@@ -927,7 +1018,7 @@ GROQ_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "consume_ingredients",
-            "description": "Odejmuje składniki z bazy SQL na podstawie wybranej receptury (np. margherita_classica, pizza_diavola, pizza_bufala, pizza_parma_arugula, pizza_prosciutto_cotto, insalata_burrata, tagliere_italiano). Zwraca informację o sukcesie lub szczegółach braków bez naruszania stanu.",
+            "description": "Odejmuje składniki z bazy SQL na podstawie wybranej receptury (np. margherita_classica, pizza_diavola, pizza_bufala, pizza_parma_arugula, pizza_prosciutto_cotto, insalata_burrata, tagliere_italiano). Gdy stan surowców spadnie poniżej progu bezpieczeństwa (safety_threshold) lub wystąpi brak (SHORTAGE), narzędzie automatycznie domawia surowce u najtańszego dostawcy w hurtowniach (auto_order).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -938,6 +1029,10 @@ GROQ_TOOLS: List[Dict[str, Any]] = [
                     "quantity": {
                         "type": "integer",
                         "description": "Liczba porcji dania do przygotowania (domyślnie 1)",
+                    },
+                    "auto_reorder": {
+                        "type": "boolean",
+                        "description": "Czy automatycznie zamówić surowce w hurtowni, gdy stan spadnie na/poniżej progu bezpieczeństwa lub wystąpi brak (domyślnie true)",
                     },
                 },
                 "required": ["dish_name"],
@@ -1161,7 +1256,15 @@ def execute_tool(
         elif name == "consume_ingredients":
             dish_name = parsed_args.get("dish_name", "")
             quantity = int(parsed_args.get("quantity", 1))
-            res = target_agent.consume_ingredients(dish_name=dish_name, quantity=quantity)
+            auto_reorder_arg = parsed_args.get("auto_reorder")
+            auto_reorder = bool(auto_reorder_arg) if auto_reorder_arg is not None else None
+            wholesalers = parsed_args.get("wholesalers")
+            res = target_agent.consume_ingredients(
+                dish_name=dish_name,
+                quantity=quantity,
+                auto_reorder=auto_reorder,
+                wholesalers=wholesalers,
+            )
         elif name == "create_procurement_request":
             item_name = parsed_args.get("item_name", "")
             quantity = int(parsed_args.get("quantity", 1))

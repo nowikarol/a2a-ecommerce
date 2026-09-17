@@ -55,6 +55,12 @@ WHOLESALER_ENDPOINTS: dict[str, str] = {
 }
 MCP_CLIENT_TIMEOUT: float = float(os.getenv("MCP_CLIENT_TIMEOUT", "3.0"))
 
+# Auto-procurement / Reordering Configuration
+AUTO_REORDER_ON_THRESHOLD: bool = os.getenv("AUTO_REORDER_ON_THRESHOLD", "true").lower() in ("true", "1", "yes")
+
+# Conversational Memory Configuration (Window of recent messages, e.g. 3-4 messages)
+MAX_MEMORY_MESSAGES: int = int(os.getenv("MAX_MEMORY_MESSAGES", "4"))
+
 
 def is_groq_configured() -> bool:
     """Checks if a non-placeholder GROQ_API_KEY is available."""

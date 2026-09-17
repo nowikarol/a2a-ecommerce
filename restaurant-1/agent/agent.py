@@ -32,7 +32,8 @@ Twoje zadania i zasady działania:
    - Każdy składnik w bazie posiada zdefiniowany próg bezpieczeństwa (safety_threshold) oraz wielkość domyślnego uzupełnienia (reorder_quantity).
 2. Obsługa potraw i receptur:
    - Realizujesz zamówienia kuchenne (np. margherita_classica, pizza_diavola, pizza_bufala, pizza_parma_arugula, pizza_prosciutto_cotto, insalata_burrata, tagliere_italiano) odejmując składniki narzędziem `consume_ingredients`.
-   - W przypadku braku surowców natychmiast raportujesz braki i przystępujesz do zaopatrzenia.
+   - ZASADA AUTOMATYCZNEGO DOMAWIANIA: Gdy stan magazynowy jakiegokolwiek surowca spadnie na lub poniżej progu bezpieczeństwa (safety_threshold) albo wystąpi brak składników (SHORTAGE) w wyniku przygotowania dań, następuje natychmiastowe automatyczne domówienie surowca (reorder) w hurtowniach za pomocą `consume_ingredients` (które domyślnie posiada auto_reorder=True) lub `request_quotes_and_evaluate(auto_order=True)`.
+   - W odpowiedzi zawsze informuj użytkownika zarówno o przygotowanych potrawach, jak i o automatycznie zainicjowanych zamówieniach uzupełniających do hurtowni.
 3. Kontrola finansowa i budżet zakupowy:
    - Restauracja dysponuje portfelem finansowym w walucie PLN, który sprawdzasz narzędziem `get_financial_status`.
    - Przed podjęciem decyzji o zakupie weryfikujesz, czy koszt oferty nie przekracza dostępnego salda środków.
@@ -42,7 +43,7 @@ Twoje zadania i zasady działania:
    - Alternatywnie możesz utworzyć zapytanie ofertowe CALL_FOR_PROPOSAL (narzędzie `create_procurement_request` lub `check_and_trigger_procurement`).
    - Posiadaną listę ofert PROPOSAL oceniasz narzędziem `evaluate_proposals`.
    - Wybór hurtowni jest deterministyczny: wybierasz ofertę o najniższym koszcie całkowitym min(total_cost), biorąc pod uwagę budżet.
-   - Generujesz komunikat ACCEPT_PROPOSAL dla zwycięzcy oraz REJECT_PROPOSAL dla pozostałych hurtowni.
+   - Generujesz komunikat ACCEPT_PROPOSAL dla zwycięzcy (pozostałe oferty milcząco wygasają bez wysyłania komunikatów, zgodnie z zasadą milczenia protokołu A2A).
    - Po dostarczeniu towaru rejestrujesz go w magazynie narzędziem `receive_delivery`, co powoduje automatyczne rozliczenie płatności w bazie SQL.
 5. Zgodność ze schematami:
    - Wszystkie tworzone komunikaty i dane muszą w 100% odpowiadać schematom z katalogu docs/schemas/ (availability-request.json, availability-response.json, request-offer.json, response-offer.json, accept-offer.json, reject.json, item.json).
@@ -60,10 +61,15 @@ class RestaurantBrain:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         agent_backend: Optional[RestaurantAgent] = None,
+        max_memory_messages: Optional[int] = None,
     ):
         self.api_key = api_key or config.GROQ_API_KEY
         self.model = model or config.GROQ_MODEL
         self.agent_backend = agent_backend or default_agent
+        self.max_memory_messages = (
+            max_memory_messages if max_memory_messages is not None else config.MAX_MEMORY_MESSAGES
+        )
+        self.conversation_memory: List[Dict[str, str]] = []
         self.client: Optional[Groq] = None
 
         if self.api_key and self.api_key != "twoj_klucz_groq":
@@ -156,17 +162,39 @@ class RestaurantBrain:
 
         return current_messages
 
-    def ask(self, user_prompt: str) -> str:
+    def clear_memory(self) -> None:
+        """Clears the conversational memory history."""
+        self.conversation_memory.clear()
+        logger.info(f"[{config.AGENT_ID}] Conversation memory cleared.")
+
+    def get_memory(self) -> List[Dict[str, str]]:
+        """Returns a copy of the current conversational memory messages."""
+        return list(self.conversation_memory)
+
+    def ask(self, user_prompt: str, use_memory: bool = True) -> str:
         """
         Submits a user prompt, executes any necessary tools, and returns the final assistant answer.
+        Maintains a sliding window of recent conversation messages (up to max_memory_messages).
         """
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+        if use_memory and self.conversation_memory:
+            # Append recent user and assistant conversation turns
+            messages.extend(self.conversation_memory[-self.max_memory_messages:])
+
+        messages.append({"role": "user", "content": user_prompt})
+
         history = self.run_conversation(messages)
         last_msg = history[-1]
-        return last_msg.get("content", "")
+        assistant_reply = last_msg.get("content", "")
+
+        if use_memory:
+            self.conversation_memory.append({"role": "user", "content": user_prompt})
+            self.conversation_memory.append({"role": "assistant", "content": assistant_reply})
+            if len(self.conversation_memory) > self.max_memory_messages:
+                self.conversation_memory = self.conversation_memory[-self.max_memory_messages:]
+
+        return assistant_reply
 
     def run_autonomous_audit(self) -> str:
         """
@@ -178,7 +206,7 @@ class RestaurantBrain:
             "Sprawdź czy jakiekolwiek składniki są poniżej progu bezpieczeństwa. "
             "Jeśli tak, zgłoś zapotrzebowanie ofertowe CALL_FOR_PROPOSAL do hurtowni H1 i H2."
         )
-        return self.ask(prompt)
+        return self.ask(prompt, use_memory=False)
 
 
 def main():
@@ -186,9 +214,15 @@ def main():
     parser.add_argument("--prompt", type=str, help="Prompt to send to the agent")
     parser.add_argument("--audit", action="store_true", help="Run autonomous inventory audit")
     parser.add_argument("--model", type=str, default=config.GROQ_MODEL, help="Groq model override")
+    parser.add_argument(
+        "--memory-size",
+        type=int,
+        default=config.MAX_MEMORY_MESSAGES,
+        help="Max recent messages in conversation memory (default: 4)",
+    )
     args = parser.parse_args()
 
-    brain = RestaurantBrain(model=args.model)
+    brain = RestaurantBrain(model=args.model, max_memory_messages=args.memory_size)
 
     if not config.is_groq_configured():
         print("\n[OSTRZEŻENIE] GROQ_API_KEY nie jest skonfigurowany lub posiada wartość domyślną.")
@@ -206,12 +240,20 @@ def main():
         print("\nOdpowiedź Agenta:")
         print(answer)
     else:
-        print(f"[R1 Agent] Tryb interaktywny z modelem '{brain.model}'. Wpisz 'exit' aby zakończyć.\n")
+        print(
+            f"[R1 Agent] Tryb interaktywny z modelem '{brain.model}'. "
+            f"Pamięć konwersacji: do {brain.max_memory_messages} ostatnich wiadomości.\n"
+            "Wpisz 'clear' lub 'reset' aby wyczyścić pamięć, 'exit' aby zakończyć.\n"
+        )
         while True:
             try:
                 user_input = input("Ty > ")
                 if user_input.strip().lower() in ("exit", "quit", "q"):
                     break
+                if user_input.strip().lower() in ("clear", "reset"):
+                    brain.clear_memory()
+                    print("\n[R1 Agent] Pamięć konwersacji została wyczyszczona.\n")
+                    continue
                 if not user_input.strip():
                     continue
                 resp = brain.ask(user_input)
