@@ -1,6 +1,6 @@
 """
 Wholesaler MCP Client for Restaurant 1 (restaurant-1).
-Connects to wholesaler MCP servers (e.g. H1 on port 8001, H2 on port 8002) via SSE,
+Connects to wholesaler MCP servers (e.g. H1 on port 8004, H2 on port 8005) via SSE,
 requests price proposals (CALL_FOR_PROPOSAL -> PROPOSAL), and sends CNP decisions.
 """
 
@@ -55,33 +55,37 @@ class WholesalerMCPClient:
         self,
         endpoints: Optional[Dict[str, str]] = None,
         timeout: float = config.MCP_CLIENT_TIMEOUT,
-        groq_client: Optional[Any] = None,
+        llm_client: Optional[Any] = None,
     ):
         self.endpoints = endpoints or config.WHOLESALER_ENDPOINTS
         self.timeout = timeout
-        self.groq_client = groq_client
+        self.llm_client = llm_client
 
-    def _get_groq_client(self) -> Optional[Any]:
-        """Returns initialized Groq client or None."""
-        if self.groq_client is not None:
-            return self.groq_client
-        if config.is_groq_configured():
+    def _get_llm_client(self) -> Optional[Any]:
+        """Returns initialized Gemini client or None."""
+        if self.llm_client is not None:
+            return self.llm_client
+        if config.is_gemini_configured():
             try:
-                from groq import Groq
-                return Groq(api_key=config.GROQ_API_KEY)
+                from openai import OpenAI
+                self.llm_client = OpenAI(
+                    base_url=config.GEMINI_BASE_URL,
+                    api_key=config.GEMINI_API_KEY,
+                )
+                return self.llm_client
             except Exception as e:
-                logger.error(f"[MCP_CLIENT] Failed to initialize Groq client: {e}")
+                logger.error(f"[MCP_CLIENT] Failed to initialize Gemini client: {e}")
                 return None
         return None
 
     def _resolve_tool_with_llm(self, tools: List[Any], task_intent: str) -> Optional[str]:
         """
-        Uses Groq LLM to inspect tool names and descriptions on the MCP server
+        Uses Gemini LLM to inspect tool names and descriptions on the MCP server
         and decide which tool matches the desired task intent.
         """
-        client = self._get_groq_client()
+        client = self._get_llm_client()
         if not client:
-            logger.warning("[MCP_CLIENT] Groq client not configured; cannot inspect tool descriptions via LLM.")
+            logger.warning("[MCP_CLIENT] Gemini client not configured; cannot inspect tool descriptions via LLM.")
             return None
 
         tools_info = []
@@ -108,8 +112,8 @@ class WholesalerMCPClient:
         )
 
         try:
-            logger.info(f"[MCP_CLIENT] Querying LLM to infer tool from descriptions for goal: '{task_intent}'...")
-            model_to_use = getattr(config, "FALLBACK_MODEL", "llama-3.1-8b-instant") or config.GROQ_MODEL
+            logger.info(f"[MCP_CLIENT] Querying Gemini LLM to infer tool from descriptions for goal: '{task_intent}'...")
+            model_to_use = getattr(config, "FALLBACK_MODEL", "gemini-3.1-flash-lite") or config.GEMINI_MODEL
             response = client.chat.completions.create(
                 model=model_to_use,
                 messages=[

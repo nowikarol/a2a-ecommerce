@@ -1,7 +1,7 @@
 """
-Unit and integration tests for Restaurant 1 (restaurant-1) MCP server and Groq Agent Brain.
+Unit and integration tests for Restaurant 1 (restaurant-1) MCP server and Gemini Agent Brain.
 Verifies Contract Net Protocol (CNP) compliance, SQL inventory logic with 11 Italian ingredients,
-financial wallet balance tracking, Groq tools, and schema compatibility.
+financial wallet balance tracking, Gemini tools, and schema compatibility.
 """
 
 import json
@@ -26,7 +26,7 @@ from data.models import (
     RejectProposalMessage,
 )
 from network.server import mcp_server
-from agent.tools import RestaurantAgent, GROQ_TOOLS, execute_tool
+from agent.tools import RestaurantAgent, GEMINI_TOOLS, execute_tool
 from agent.agent import RestaurantBrain, SYSTEM_PROMPT
 from network.mcp_client import WholesalerMCPClient, default_mcp_client
 
@@ -441,11 +441,11 @@ class TestRestaurantAgentSQLTools:
         assert len(rfp_group["rfps"]) == 2
 
 
-class TestGroqToolsAndBrain:
-    """Test Groq tools specifications, dispatcher, and brain tool calling loop."""
+class TestGeminiToolsAndBrain:
+    """Test Gemini tools specifications, dispatcher, and brain tool calling loop."""
 
-    def test_groq_tools_specifications(self):
-        assert len(GROQ_TOOLS) >= 7
+    def test_gemini_tools_specifications(self):
+        assert len(GEMINI_TOOLS) >= 7
         expected_names = {
             "check_inventory",
             "get_financial_status",
@@ -456,7 +456,7 @@ class TestGroqToolsAndBrain:
             "receive_delivery",
             "check_and_trigger_procurement",
         }
-        actual_names = {t["function"]["name"] for t in GROQ_TOOLS}
+        actual_names = {t["function"]["name"] for t in GEMINI_TOOLS}
         assert expected_names.issubset(actual_names)
 
     def test_execute_tool_dispatcher(self, temp_restaurant):
@@ -495,7 +495,7 @@ class TestGroqToolsAndBrain:
         assert eval_res["winning_total_cost"] == 225.0
 
     def test_restaurant_brain_tool_calling_loop_mocked(self, temp_restaurant):
-        """Mocks Groq API responses to verify the full tool calling loop execution."""
+        """Mocks Gemini API responses to verify the full tool calling loop execution."""
         mock_client = MagicMock()
 
         # Step 1: Model emits tool call for check_inventory
@@ -644,12 +644,12 @@ def test_mcp_server_tools_registered():
         )
 
 
-def test_agent_groq_tools_complete():
+def test_agent_gemini_tools_complete():
     """
-    Weryfikacja, że lokalny agent Groq (RestaurantBrain) nadal posiada pełen zestaw
-    narzędzi biznesowych w GROQ_TOOLS do realizacji zadań i pętli decyzyjnych.
+    Weryfikacja, że lokalny agent Gemini (RestaurantBrain) nadal posiada pełen zestaw
+    narzędzi biznesowych w GEMINI_TOOLS do realizacji zadań i pętli decyzyjnych.
     """
-    groq_tool_names = [t["function"]["name"] for t in GROQ_TOOLS]
+    gemini_tool_names = [t["function"]["name"] for t in GEMINI_TOOLS]
     expected_agent_tools = [
         "check_inventory",
         "get_financial_status",
@@ -663,7 +663,7 @@ def test_agent_groq_tools_complete():
         "request_quotes_and_evaluate",
     ]
     for req in expected_agent_tools:
-        assert req in groq_tool_names, f"Narzędzie '{req}' brakuje w GROQ_TOOLS agenta"
+        assert req in gemini_tool_names, f"Narzędzie '{req}' brakuje w GEMINI_TOOLS agenta"
 
 
 def test_get_node_info(temp_restaurant):
@@ -1076,19 +1076,19 @@ class TestWholesalerMCPIntegration:
             FakeTool("check_wholesaler_warehouse_stock", "Sprawdza dostępność surowca w magazynie hurtowni"),
         ]
 
-        mock_groq = MagicMock()
+        mock_llm = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "check_wholesaler_warehouse_stock"
-        mock_groq.chat.completions.create.return_value = mock_response
+        mock_llm.chat.completions.create.return_value = mock_response
 
-        client = WholesalerMCPClient(groq_client=mock_groq)
+        client = WholesalerMCPClient(llm_client=mock_llm)
         chosen = client._resolve_tool_with_llm(
             tools=tools,
             task_intent="Sprawdzanie dostępności surowca",
         )
         assert chosen == "check_wholesaler_warehouse_stock"
-        mock_groq.chat.completions.create.assert_called_once()
+        mock_llm.chat.completions.create.assert_called_once()
 
     def test_resolve_tool_with_llm_returns_none_when_no_match(self):
         """Verify _resolve_tool_with_llm returns None when LLM replies with NONE."""
@@ -1103,13 +1103,13 @@ class TestWholesalerMCPIntegration:
             FakeTool("print_invoice", "Drukarka faktur"),
         ]
 
-        mock_groq = MagicMock()
+        mock_llm = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "NONE"
-        mock_groq.chat.completions.create.return_value = mock_response
+        mock_llm.chat.completions.create.return_value = mock_response
 
-        client = WholesalerMCPClient(groq_client=mock_groq)
+        client = WholesalerMCPClient(llm_client=mock_llm)
         chosen = client._resolve_tool_with_llm(
             tools=tools,
             task_intent="Sprawdzanie dostępności surowca",
@@ -1117,10 +1117,10 @@ class TestWholesalerMCPIntegration:
         assert chosen is None
 
     def test_resolve_tool_with_llm_returns_none_when_unconfigured(self, monkeypatch):
-        """Verify _resolve_tool_with_llm returns None if Groq is not configured."""
+        """Verify _resolve_tool_with_llm returns None if Gemini is not configured."""
         import config
-        monkeypatch.setattr(config, "GROQ_API_KEY", "")
-        monkeypatch.setattr(config, "is_groq_configured", lambda: False)
+        monkeypatch.setattr(config, "GEMINI_API_KEY", "")
+        monkeypatch.setattr(config, "is_gemini_configured", lambda: False)
 
         class FakeTool:
             def __init__(self, name, description):
@@ -1128,7 +1128,7 @@ class TestWholesalerMCPIntegration:
                 self.description = description
 
         tools = [FakeTool("some_tool", "Opis")]
-        client = WholesalerMCPClient(groq_client=None)
+        client = WholesalerMCPClient(llm_client=None)
         chosen = client._resolve_tool_with_llm(tools=tools, task_intent="dowolny cel")
         assert chosen is None
 
@@ -1142,13 +1142,13 @@ class TestWholesalerMCPIntegration:
                 self.description = description
 
         tools = [FakeTool("actual_tool", "Opis actual tool")]
-        mock_groq = MagicMock()
+        mock_llm = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "invented_tool_that_does_not_exist"
-        mock_groq.chat.completions.create.return_value = mock_response
+        mock_llm.chat.completions.create.return_value = mock_response
 
-        client = WholesalerMCPClient(groq_client=mock_groq)
+        client = WholesalerMCPClient(llm_client=mock_llm)
         chosen = client._resolve_tool_with_llm(tools=tools, task_intent="dowolny cel")
         assert chosen is None
 
@@ -1251,7 +1251,7 @@ class TestAutoReorderAndConversationalMemory:
 
     def test_restaurant_brain_conversational_memory_sliding_window(self, temp_restaurant):
         """Verify RestaurantBrain maintains up to 4 recent messages and slides window correctly."""
-        mock_groq = MagicMock()
+        mock_llm = MagicMock()
 
         def make_reply(text):
             m = MagicMock()
@@ -1261,7 +1261,7 @@ class TestAutoReorderAndConversationalMemory:
             m.choices = [choice]
             return m
 
-        mock_groq.chat.completions.create.side_effect = [
+        mock_llm.chat.completions.create.side_effect = [
             make_reply("Mamy 40 kg mozzarelli."),
             make_reply("Do margherity potrzebujemy 2 kg sera."),
             make_reply("Przygotowano 3 pizze margherita."),
@@ -1272,7 +1272,7 @@ class TestAutoReorderAndConversationalMemory:
             agent_backend=temp_restaurant,
             max_memory_messages=4,
         )
-        brain.client = mock_groq
+        brain.client = mock_llm
 
         # Turn 1
         reply1 = brain.ask("Ile mamy mozzarelli?")
@@ -1300,16 +1300,16 @@ class TestAutoReorderAndConversationalMemory:
 
     def test_restaurant_brain_clear_memory(self, temp_restaurant):
         """Verify clear_memory empties the conversation memory."""
-        mock_groq = MagicMock()
+        mock_llm = MagicMock()
         choice = MagicMock()
         choice.message.content = "Jasne!"
         choice.message.tool_calls = None
         mock_resp = MagicMock()
         mock_resp.choices = [choice]
-        mock_groq.chat.completions.create.return_value = mock_resp
+        mock_llm.chat.completions.create.return_value = mock_resp
 
         brain = RestaurantBrain(api_key="mock_key_test", agent_backend=temp_restaurant)
-        brain.client = mock_groq
+        brain.client = mock_llm
 
         brain.ask("Cześć!")
         assert len(brain.get_memory()) == 2
@@ -1318,5 +1318,19 @@ class TestAutoReorderAndConversationalMemory:
         assert brain.get_memory() == []
 
 
+class TestPortConfiguration:
+    """Verifies that R1, H1, and H2 ports comply with the required network layout."""
 
+    def test_r1_and_wholesaler_ports(self):
+        """R1 should default to 8002, H1 to 8004, and H2 to 8005."""
+        import config
+        from network.mcp_client import WholesalerMCPClient
 
+        assert config.PORT == 8002
+        assert config.SERVER_PORT == 8002
+        assert "8004" in config.WHOLESALER_ENDPOINTS["H1"]
+        assert "8005" in config.WHOLESALER_ENDPOINTS["H2"]
+
+        client = WholesalerMCPClient()
+        assert "8004" in client.endpoints["H1"]
+        assert "8005" in client.endpoints["H2"]
