@@ -47,13 +47,28 @@ def init_db(products: List[Dict[str, Any]]):
             """, (p['name'].lower().strip(), p['quantity'], p.get('unit', 'pcs'), p['price']))
         conn.commit()
 
-def db_get_product(name: str) -> Optional[Dict[str, Any]]:
-    clean_name = name.lower().strip()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, quantity, unit, price FROM products WHERE LOWER(name) = ?", (clean_name,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+def db_get_product(item_name: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Czyszczenie i dopasowanie bez względu na wielkość liter
+    clean_name = item_name.strip().lower()
+    
+    cursor.execute(
+        "SELECT name, quantity, unit, price FROM products WHERE LOWER(TRIM(name)) = ?", 
+        (clean_name,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            "name": row[0],
+            "quantity": float(row[1]),
+            "unit": row[2],
+            "price": float(row[3])
+        }
+    return None
 
 def db_get_all_products() -> List[Dict[str, Any]]:
     with get_connection() as conn:
