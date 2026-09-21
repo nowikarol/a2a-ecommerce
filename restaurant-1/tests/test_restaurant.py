@@ -438,6 +438,7 @@ class TestRestaurantAgentSQLTools:
         assert len(res["generated_rfps"]) == 1
         rfp_group = res["generated_rfps"][0]
         assert rfp_group["item_name"] == "passata"
+        assert rfp_group["ordered_quantity"] == 50  # Exactly reorder_quantity from inventory
         assert len(rfp_group["rfps"]) == 2
 
 
@@ -679,7 +680,7 @@ class TestWholesalerMCPIntegration:
 
     def test_wholesaler_mcp_client_offline_unreachable(self):
         """Verify that when wholesalers are offline/unreachable, no fake quotes are invented."""
-        client = WholesalerMCPClient()
+        client = WholesalerMCPClient(endpoints={"H1": "http://127.0.0.1:59998/sse", "H2": "http://127.0.0.1:59999/sse"})
         quote = client.fetch_quote("H1", "flour", 50)
         assert quote is None
         quotes = client.fetch_all_quotes("flour", 50, wholesaler_ids=["H1", "H2"])
@@ -935,7 +936,7 @@ class TestWholesalerMCPIntegration:
 
     def test_wholesaler_mcp_client_check_availability_offline(self):
         """Verify unreachable wholesaler returns is_available=False without artificial fallback."""
-        client = WholesalerMCPClient()
+        client = WholesalerMCPClient(endpoints={"H1": "http://127.0.0.1:59998/sse", "H2": "http://127.0.0.1:59999/sse"})
         avail = client.check_all_availability("flour", 50, wholesaler_ids=["H1", "H2"])
         assert avail["H1"]["is_available"] is False
         assert avail["H1"]["available_quantity"] == 0
@@ -1197,6 +1198,7 @@ class TestAutoReorderAndConversationalMemory:
 
         reorder = next(r for r in res["auto_reorders"] if r["item_name"] == "passata")
         assert reorder["reason"] == "SAFETY_THRESHOLD_BREACH"
+        assert reorder["quantity"] == 50  # Exactly reorder_quantity from inventory table
         assert reorder["reorder_result"]["status"] == "SUCCESS"
         assert reorder["reorder_result"]["auto_order_dispatched"] is True
         assert reorder["reorder_result"]["winning_wholesaler"] == "H1"
@@ -1334,3 +1336,121 @@ class TestPortConfiguration:
         client = WholesalerMCPClient()
         assert "8004" in client.endpoints["H1"]
         assert "8005" in client.endpoints["H2"]
+
+
+class TestWholesalerPayloadCompatibility:
+    """Verifies that WholesalerMCPClient builds arguments dynamically matching H1 and H2 schemas."""
+
+    class MockMCPTool:
+        def __init__(self, name: str, properties: list[str]):
+            self.name = name
+            self.inputSchema = {"type": "object", "properties": {p: {} for p in properties}}
+
+    def test_h2_check_availability_payload(self):
+        """H2 expects: sender_id, item, receiver_id, message_type."""
+        client = WholesalerMCPClient()
+        h2_tool = self.MockMCPTool("check_availability", ["sender_id", "item", "receiver_id", "message_type"])
+        args = client._build_call_arguments(
+            tool_obj=h2_tool,
+            wholesaler_id="H2",
+            item_name="passata",
+            quantity=25,
+            action="AVAILABILITY",
+        )
+        assert args["sender_id"] == "R1"
+        assert args["receiver_id"] == "H2"
+        assert args["message_type"] == "AVAILABILITY_REQUEST"
+        assert args["item"] == {"name": "passata", "quantity": 25, "unit": "kg"}
+
+    def test_h1_check_availability_payload(self):
+        """H1 expects: receiver_id, item."""
+        client = WholesalerMCPClient()
+        h1_tool = self.MockMCPTool("check_availability", ["receiver_id", "item"])
+        args = client._build_call_arguments(
+            tool_obj=h1_tool,
+            wholesaler_id="H1",
+            item_name="flour",
+            quantity=50,
+            action="AVAILABILITY",
+        )
+        assert args["receiver_id"] == "H1"
+        assert "sender_id" not in args
+        assert args["item"] == {"name": "flour", "quantity": 50, "unit": "kg"}
+
+    def test_h2_request_offer_payload(self):
+        """H2 expects: sender_id, item, receiver_id, message_type."""
+        client = WholesalerMCPClient()
+        h2_tool = self.MockMCPTool("request_offer", ["sender_id", "item", "receiver_id", "message_type"])
+        args = client._build_call_arguments(
+            tool_obj=h2_tool,
+            wholesaler_id="H2",
+            item_name="burrata",
+            quantity=10,
+            action="QUOTE",
+        )
+        assert args["sender_id"] == "R1"
+        assert args["receiver_id"] == "H2"
+        assert args["message_type"] == "CALL_FOR_PROPOSAL"
+        assert args["item"] == {"name": "burrata", "quantity": 10, "unit": "kg"}
+
+    def test_h2_accept_offer_payload(self):
+        """H2 expects: sender_id, item, total_cost, receiver_id, message_type."""
+        client = WholesalerMCPClient()
+        h2_tool = self.MockMCPTool("accept_offer", ["sender_id", "item", "total_cost", "receiver_id", "message_type"])
+        dec_msg = {
+            "sender_id": "R1",
+            "receiver_id": "H2",
+            "message_type": "ACCEPT_PROPOSAL",
+            "item": {"name": "mozzarella", "quantity": 15, "price": 12.0},
+            "total_cost": 180.0,
+        }
+        args = client._build_call_arguments(
+            tool_obj=h2_tool,
+            wholesaler_id="H2",
+            item_name="mozzarella",
+            quantity=15,
+            action="DECISION",
+            decision_msg=dec_msg,
+        )
+        assert args["sender_id"] == "R1"
+        assert args["receiver_id"] == "H2"
+        assert args["message_type"] == "ACCEPT_PROPOSAL"
+        assert args["total_cost"] == 180.0
+        assert args["item"]["name"] == "mozzarella"
+        assert args["item"]["price"] == 12.0
+
+    def test_h1_accept_offer_payload(self):
+        """H1 expects: receiver_id, item, total_cost, sender_id."""
+        client = WholesalerMCPClient()
+        h1_tool = self.MockMCPTool("accept_offer", ["receiver_id", "item", "total_cost", "sender_id"])
+        dec_msg = {
+            "sender_id": "R1",
+            "receiver_id": "H1",
+            "message_type": "ACCEPT_PROPOSAL",
+            "item": {"name": "passata", "quantity": 20, "price": 5.0},
+            "total_cost": 100.0,
+        }
+        args = client._build_call_arguments(
+            tool_obj=h1_tool,
+            wholesaler_id="H1",
+            item_name="passata",
+            quantity=20,
+            action="DECISION",
+            decision_msg=dec_msg,
+        )
+        assert args["receiver_id"] == "H1"
+        assert args["sender_id"] == "R1"
+        assert args["total_cost"] == 100.0
+        assert args["item"]["name"] == "passata"
+        assert "message_type" not in args
+
+    def test_wholesaler_url_fallback_resolution(self):
+        """Verify H1 candidate URLs include both /sse and /mcp/sse variants."""
+        client = WholesalerMCPClient(endpoints={"H1": "http://127.0.0.1:8004/sse", "H2": "http://127.0.0.1:8005/sse"})
+        h1_urls = client._get_wholesaler_urls("H1")
+        assert "http://127.0.0.1:8004/sse" in h1_urls
+        assert "http://127.0.0.1:8004/mcp/sse" in h1_urls
+
+        h2_urls = client._get_wholesaler_urls("H2")
+        assert h2_urls == ["http://127.0.0.1:8005/sse"]
+

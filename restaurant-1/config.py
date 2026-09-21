@@ -55,7 +55,7 @@ INITIAL_BALANCE: float = float(os.getenv("RESTAURANT_INITIAL_BALANCE", "5000.0")
 
 # Wholesaler Endpoints (MCP Servers for H1, H2)
 WHOLESALER_ENDPOINTS: dict[str, str] = {
-    "H1": os.getenv("H1_MCP_URL", "http://127.0.0.1:8004/sse"),
+    "H1": os.getenv("H1_MCP_URL", "http://127.0.0.1:8004/mcp/sse"),
     "H2": os.getenv("H2_MCP_URL", "http://127.0.0.1:8005/sse"),
 }
 MCP_CLIENT_TIMEOUT: float = float(os.getenv("MCP_CLIENT_TIMEOUT", "3.0"))

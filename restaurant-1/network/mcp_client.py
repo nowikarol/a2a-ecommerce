@@ -144,15 +144,179 @@ class WholesalerMCPClient:
             logger.error(f"[MCP_CLIENT] LLM tool resolution failed: {e}")
             return None
 
+    def _get_wholesaler_urls(self, wholesaler_id: str) -> List[str]:
+        """Returns candidate URLs for a wholesaler, handling /sse and /mcp/sse variants."""
+        primary = self.endpoints.get(wholesaler_id)
+        if not primary:
+            return []
+        urls = [primary]
+        if wholesaler_id == "H1" or ":8004" in primary:
+            if primary.endswith("/sse") and not primary.endswith("/mcp/sse"):
+                alt = primary.replace("/sse", "/mcp/sse")
+                if alt not in urls:
+                    urls.append(alt)
+            elif primary.endswith("/mcp/sse"):
+                alt = primary.replace("/mcp/sse", "/sse")
+                if alt not in urls:
+                    urls.append(alt)
+        return urls
+
+    def _build_call_arguments(
+        self,
+        tool_obj: Optional[Any],
+        wholesaler_id: str,
+        item_name: str,
+        quantity: int,
+        action: str,  # "AVAILABILITY", "QUOTE", "DECISION"
+        decision_msg: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Dynamically builds tool arguments conforming to the remote MCP tool's inputSchema.
+        Supports:
+        - H2 (warehouse-2): check_availability(sender_id, item, receiver_id, message_type)
+                            request_offer(sender_id, item, receiver_id, message_type)
+                            accept_offer(sender_id, item, total_cost, receiver_id, message_type)
+        - H1 (warehouse-1): check_availability(receiver_id, item)
+                            request_offer(receiver_id, item)
+                            accept_offer(receiver_id, item, total_cost, sender_id)
+        - Flat / legacy parameter names (item_name, quantity) and docs/schemas/ standards.
+        """
+        props: Dict[str, Any] = {}
+        if tool_obj and hasattr(tool_obj, "inputSchema") and isinstance(tool_obj.inputSchema, dict):
+            props = tool_obj.inputSchema.get("properties", {}) or {}
+
+        item_payload: Dict[str, Any] = {"name": item_name, "quantity": quantity, "unit": "kg"}
+
+        if action == "AVAILABILITY":
+            if props:
+                if "item" in props:
+                    args: Dict[str, Any] = {"item": item_payload}
+                    if "sender_id" in props:
+                        args["sender_id"] = config.AGENT_ID
+                    if "receiver_id" in props:
+                        args["receiver_id"] = wholesaler_id
+                    if "message_type" in props:
+                        args["message_type"] = "AVAILABILITY_REQUEST"
+                    return args
+                elif "Availability_Request" in props:
+                    return {
+                        "Availability_Request": {
+                            "sender_id": config.AGENT_ID,
+                            "receiver_id": wholesaler_id,
+                            "message_type": "AVAILABILITY_REQUEST",
+                            "item": item_payload,
+                        }
+                    }
+                elif "item_name" in props:
+                    args = {"item_name": item_name, "quantity": quantity}
+                    if "sender_id" in props:
+                        args["sender_id"] = config.AGENT_ID
+                    if "receiver_id" in props:
+                        args["receiver_id"] = wholesaler_id
+                    return args
+            return {
+                "sender_id": config.AGENT_ID,
+                "receiver_id": wholesaler_id,
+                "item": item_payload,
+                "message_type": "AVAILABILITY_REQUEST",
+            }
+
+        elif action == "QUOTE":
+            if props:
+                if "item" in props:
+                    args = {"item": item_payload}
+                    if "sender_id" in props:
+                        args["sender_id"] = config.AGENT_ID
+                    if "receiver_id" in props:
+                        args["receiver_id"] = wholesaler_id
+                    if "message_type" in props:
+                        args["message_type"] = "CALL_FOR_PROPOSAL"
+                    return args
+                elif "Request_Offer" in props:
+                    return {
+                        "Request_Offer": {
+                            "sender_id": config.AGENT_ID,
+                            "receiver_id": wholesaler_id,
+                            "message_type": "CALL_FOR_PROPOSAL",
+                            "item": item_payload,
+                        }
+                    }
+                elif "item_name" in props:
+                    args = {"item_name": item_name, "quantity": quantity}
+                    if "sender_id" in props:
+                        args["sender_id"] = config.AGENT_ID
+                    if "receiver_id" in props:
+                        args["receiver_id"] = wholesaler_id
+                    return args
+            return {
+                "sender_id": config.AGENT_ID,
+                "receiver_id": wholesaler_id,
+                "item": item_payload,
+                "message_type": "CALL_FOR_PROPOSAL",
+            }
+
+        elif action == "DECISION":
+            dec = decision_msg or {}
+            raw_item = dec.get("item", {})
+            if isinstance(raw_item, dict):
+                item_dict = dict(raw_item)
+            else:
+                item_dict = {"name": item_name, "quantity": quantity}
+            if "unit" not in item_dict:
+                item_dict["unit"] = "kg"
+
+            total_cost = dec.get("total_cost")
+            if total_cost is None:
+                price = item_dict.get("price", 0.0) or 0.0
+                qty = item_dict.get("quantity", quantity)
+                total_cost = round(float(price) * float(qty), 2)
+            else:
+                total_cost = float(total_cost)
+
+            sender_id = dec.get("sender_id", config.AGENT_ID)
+            receiver_id = dec.get("receiver_id", wholesaler_id)
+            message_type = dec.get("message_type", "ACCEPT_PROPOSAL")
+
+            if props:
+                if "item" in props:
+                    args = {"item": item_dict}
+                    if "total_cost" in props:
+                        args["total_cost"] = total_cost
+                    if "sender_id" in props:
+                        args["sender_id"] = sender_id
+                    if "receiver_id" in props:
+                        args["receiver_id"] = receiver_id
+                    if "message_type" in props:
+                        args["message_type"] = message_type
+                    return args
+                elif "Accept_Offer" in props:
+                    return {
+                        "Accept_Offer": {
+                            "sender_id": sender_id,
+                            "receiver_id": receiver_id,
+                            "message_type": message_type,
+                            "item": item_dict,
+                            "total_cost": total_cost,
+                        }
+                    }
+                elif "decision_data" in props:
+                    return {"decision_data": dec}
+            return {
+                "sender_id": sender_id,
+                "receiver_id": receiver_id,
+                "item": item_dict,
+                "total_cost": total_cost,
+                "message_type": message_type,
+            }
+
     async def check_availability_async(
         self, wholesaler_id: str, item_name: str, quantity: int
     ) -> Dict[str, Any]:
         """
         Asynchronously checks whether a wholesaler has the requested item quantity in stock.
         """
-        # Attempt real MCP SSE connection
-        url = self.endpoints.get(wholesaler_id)
-        if not url:
+        urls = self._get_wholesaler_urls(wholesaler_id)
+        if not urls:
             logger.warning(f"[MCP_CLIENT] No endpoint configured for wholesaler '{wholesaler_id}'")
             return {
                 "sender_id": wholesaler_id,
@@ -164,85 +328,120 @@ class WholesalerMCPClient:
                 "error": "No endpoint configured",
             }
 
-        logger.info(f"[MCP_CLIENT] Checking availability at {wholesaler_id} ({url})...")
-        try:
-            async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+        last_error = None
+        for url in urls:
+            logger.info(f"[MCP_CLIENT] Checking availability at {wholesaler_id} ({url})...")
+            try:
+                async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
 
-                    tools_list = await session.list_tools()
-                    tool_names = [t.name for t in tools_list.tools]
+                        tools_list = await session.list_tools()
+                        tool_names = [t.name for t in tools_list.tools]
 
-                    candidate_tools = [
-                        "check_availability",
-                        "get_availability",
-                        "check_stock",
-                        "query_stock",
-                        "is_available",
-                    ]
-                    chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
+                        candidate_tools = [
+                            "check_availability",
+                            "get_availability",
+                            "check_stock",
+                            "query_stock",
+                            "is_available",
+                        ]
+                        chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
 
-                    if not chosen_tool:
-                        logger.info(
-                            f"[MCP_CLIENT] None of candidate tool names found on {wholesaler_id}. "
-                            "Checking tool descriptions on MCP server via LLM..."
+                        if not chosen_tool:
+                            logger.info(
+                                f"[MCP_CLIENT] None of candidate tool names found on {wholesaler_id}. "
+                                "Checking tool descriptions on MCP server via LLM..."
+                            )
+                            chosen_tool = self._resolve_tool_with_llm(
+                                tools=tools_list.tools,
+                                task_intent="Sprawdzenie dostępności surowca i stanu magazynowego hurtowni (check item stock and availability)",
+                            )
+
+                        if not chosen_tool:
+                            logger.warning(
+                                f"[MCP_CLIENT] Wholesaler {wholesaler_id} does not expose availability tool."
+                            )
+                            return {
+                                "sender_id": wholesaler_id,
+                                "receiver_id": config.AGENT_ID,
+                                "message_type": "AVAILABILITY_RESPONSE",
+                                "item": {"name": item_name, "quantity": quantity},
+                                "is_available": False,
+                                "available_quantity": 0,
+                                "error": "Availability tool not found on server",
+                            }
+
+                        chosen_tool_obj = next((t for t in tools_list.tools if getattr(t, "name", None) == chosen_tool), None)
+                        tool_args = self._build_call_arguments(
+                            tool_obj=chosen_tool_obj,
+                            wholesaler_id=wholesaler_id,
+                            item_name=item_name,
+                            quantity=quantity,
+                            action="AVAILABILITY",
                         )
-                        chosen_tool = self._resolve_tool_with_llm(
-                            tools=tools_list.tools,
-                            task_intent="Sprawdzenie dostępności surowca i stanu magazynowego hurtowni (check item stock and availability)",
-                        )
 
-                    if not chosen_tool:
-                        logger.warning(
-                            f"[MCP_CLIENT] Wholesaler {wholesaler_id} does not expose availability tool."
-                        )
-                        return {
-                            "sender_id": wholesaler_id,
-                            "receiver_id": config.AGENT_ID,
-                            "message_type": "AVAILABILITY_RESPONSE",
-                            "item": {"name": item_name, "quantity": quantity},
-                            "is_available": False,
-                            "available_quantity": 0,
-                            "error": "Availability tool not found on server",
-                        }
+                        result = await session.call_tool(chosen_tool, arguments=tool_args)
+                        if not result.content:
+                            return {
+                                "sender_id": wholesaler_id,
+                                "receiver_id": config.AGENT_ID,
+                                "message_type": "AVAILABILITY_RESPONSE",
+                                "item": {"name": item_name, "quantity": quantity},
+                                "is_available": False,
+                                "available_quantity": 0,
+                                "error": "Empty tool response",
+                            }
 
-                    tool_args = {
-                        "item_name": item_name,
-                        "quantity": quantity,
-                        "sender_id": config.AGENT_ID,
-                    }
+                        raw_text = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+                        try:
+                            avail_dict = json.loads(raw_text)
+                        except Exception:
+                            import ast
+                            try:
+                                avail_dict = ast.literal_eval(raw_text)
+                            except Exception:
+                                avail_dict = {"raw": raw_text}
 
-                    result = await session.call_tool(chosen_tool, arguments=tool_args)
-                    if not result.content:
-                        return {
-                            "sender_id": wholesaler_id,
-                            "receiver_id": config.AGENT_ID,
-                            "message_type": "AVAILABILITY_RESPONSE",
-                            "item": {"name": item_name, "quantity": quantity},
-                            "is_available": False,
-                            "available_quantity": 0,
-                            "error": "Empty tool response",
-                        }
+                        if isinstance(avail_dict, dict):
+                            if "is_available" not in avail_dict:
+                                if "available" in avail_dict:
+                                    avail_dict["is_available"] = bool(avail_dict["available"])
+                                elif "status" in avail_dict:
+                                    avail_dict["is_available"] = avail_dict["status"] in ("AVAILABLE", "OK", "SUCCESS")
+                            if isinstance(avail_dict.get("is_available"), str):
+                                avail_dict["is_available"] = avail_dict["is_available"].lower() in ("true", "1", "yes")
+                            if "available_quantity" in avail_dict and avail_dict["available_quantity"] is not None:
+                                try:
+                                    avail_dict["available_quantity"] = int(avail_dict["available_quantity"])
+                                except (ValueError, TypeError):
+                                    pass
+                            if "sender_id" not in avail_dict:
+                                avail_dict["sender_id"] = wholesaler_id
+                            if "receiver_id" not in avail_dict:
+                                avail_dict["receiver_id"] = config.AGENT_ID
+                            if "message_type" not in avail_dict:
+                                avail_dict["message_type"] = "AVAILABILITY_RESPONSE"
+                            if "item" not in avail_dict:
+                                avail_dict["item"] = {"name": item_name, "quantity": quantity}
+                        return avail_dict
 
-                    raw_text = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
-                    avail_dict = json.loads(raw_text)
-                    if "is_available" not in avail_dict and "available" in avail_dict:
-                        avail_dict["is_available"] = bool(avail_dict["available"])
-                    return avail_dict
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"[MCP_CLIENT] Availability check for {wholesaler_id} ({url}) failed: {e}"
+                )
+                continue
 
-        except Exception as e:
-            logger.warning(
-                f"[MCP_CLIENT] Availability check for {wholesaler_id} ({url}) failed: {e}"
-            )
-            return {
-                "sender_id": wholesaler_id,
-                "receiver_id": config.AGENT_ID,
-                "message_type": "AVAILABILITY_RESPONSE",
-                "item": {"name": item_name, "quantity": quantity},
-                "is_available": False,
-                "available_quantity": 0,
-                "error": str(e),
-            }
+        return {
+            "sender_id": wholesaler_id,
+            "receiver_id": config.AGENT_ID,
+            "message_type": "AVAILABILITY_RESPONSE",
+            "item": {"name": item_name, "quantity": quantity},
+            "is_available": False,
+            "available_quantity": 0,
+            "error": str(last_error),
+        }
 
     async def check_all_availability_async(
         self, item_name: str, quantity: int, wholesaler_ids: Optional[List[str]] = None
@@ -279,68 +478,90 @@ class WholesalerMCPClient:
         """
         Asynchronously connects to a wholesaler MCP server via SSE and requests a quote.
         """
-        # Attempt real MCP SSE connection
-        url = self.endpoints.get(wholesaler_id)
-        if not url:
+        urls = self._get_wholesaler_urls(wholesaler_id)
+        if not urls:
             logger.warning(f"[MCP_CLIENT] No endpoint configured for wholesaler '{wholesaler_id}'")
             return None
 
-        logger.info(f"[MCP_CLIENT] Connecting to {wholesaler_id} at {url}...")
-        try:
-            async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+        for url in urls:
+            logger.info(f"[MCP_CLIENT] Connecting to {wholesaler_id} at {url}...")
+            try:
+                async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
 
-                    # Find appropriate tool name (e.g. request_quote, handle_call_for_proposal, get_quote)
-                    tools_list = await session.list_tools()
-                    tool_names = [t.name for t in tools_list.tools]
+                        tools_list = await session.list_tools()
+                        tool_names = [t.name for t in tools_list.tools]
 
-                    candidate_tools = [
-                        "request_offer",
-                        "get_price_proposal",
-                        "request_quote",
-                        "handle_call_for_proposal",
-                        "create_quote",
-                        "get_quote",
-                    ]
-                    chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
+                        candidate_tools = [
+                            "request_offer",
+                            "get_price_proposal",
+                            "request_quote",
+                            "handle_call_for_proposal",
+                            "create_quote",
+                            "get_quote",
+                        ]
+                        chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
 
-                    if not chosen_tool:
-                        logger.info(
-                            f"[MCP_CLIENT] None of candidate tool names found on {wholesaler_id}. "
-                            "Checking tool descriptions on MCP server via LLM..."
+                        if not chosen_tool:
+                            logger.info(
+                                f"[MCP_CLIENT] None of candidate tool names found on {wholesaler_id}. "
+                                "Checking tool descriptions on MCP server via LLM..."
+                            )
+                            chosen_tool = self._resolve_tool_with_llm(
+                                tools=tools_list.tools,
+                                task_intent="Zapytanie o wycenę lub ofertę cenową na surowiec (request price quote or call for proposal for an item)",
+                            )
+
+                        if not chosen_tool:
+                            logger.error(f"[MCP_CLIENT] No suitable quote tool found on {wholesaler_id}")
+                            return None
+
+                        chosen_tool_obj = next((t for t in tools_list.tools if getattr(t, "name", None) == chosen_tool), None)
+                        tool_args = self._build_call_arguments(
+                            tool_obj=chosen_tool_obj,
+                            wholesaler_id=wholesaler_id,
+                            item_name=item_name,
+                            quantity=quantity,
+                            action="QUOTE",
                         )
-                        chosen_tool = self._resolve_tool_with_llm(
-                            tools=tools_list.tools,
-                            task_intent="Zapytanie o wycenę lub ofertę cenową na surowiec (request price quote or call for proposal for an item)",
-                        )
 
-                    if not chosen_tool:
-                        logger.error(f"[MCP_CLIENT] No suitable quote tool found on {wholesaler_id}")
-                        return None
+                        result = await session.call_tool(chosen_tool, arguments=tool_args)
 
-                    tool_args = {
-                        "item_name": item_name,
-                        "quantity": quantity,
-                        "sender_id": config.AGENT_ID,
-                    }
+                        if not result.content:
+                            logger.error(f"[MCP_CLIENT] Empty response from {wholesaler_id}")
+                            return None
 
-                    result = await session.call_tool(chosen_tool, arguments=tool_args)
+                        raw_text = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
+                        try:
+                            proposal_dict = json.loads(raw_text)
+                        except Exception:
+                            import ast
+                            try:
+                                proposal_dict = ast.literal_eval(raw_text)
+                            except Exception:
+                                proposal_dict = {}
 
-                    if not result.content:
-                        logger.error(f"[MCP_CLIENT] Empty response from {wholesaler_id}")
-                        return None
+                        if not isinstance(proposal_dict, dict):
+                            logger.error(f"[MCP_CLIENT] Non-dict proposal response from {wholesaler_id}: {raw_text}")
+                            return None
 
-                    raw_text = result.content[0].text if hasattr(result.content[0], "text") else str(result.content[0])
-                    proposal_dict = json.loads(raw_text)
+                        if "message_type" not in proposal_dict:
+                            proposal_dict["message_type"] = "PROPOSAL"
+                        if "sender_id" not in proposal_dict:
+                            proposal_dict["sender_id"] = wholesaler_id
+                        if "receiver_id" not in proposal_dict:
+                            proposal_dict["receiver_id"] = config.AGENT_ID
 
-                    # Validate format
-                    ProposalMessage(**proposal_dict)
-                    return proposal_dict
+                        # Validate format
+                        ProposalMessage(**proposal_dict)
+                        return proposal_dict
 
-        except Exception as e:
-            logger.warning(f"[MCP_CLIENT] Connection to {wholesaler_id} ({url}) failed: {e}")
-            return None
+            except Exception as e:
+                logger.warning(f"[MCP_CLIENT] Connection to {wholesaler_id} ({url}) failed: {e}")
+                continue
+
+        return None
 
     async def fetch_all_quotes_async(
         self, item_name: str, quantity: int, wholesaler_ids: Optional[List[str]] = None
@@ -369,11 +590,11 @@ class WholesalerMCPClient:
         Per A2A protocol, unselected offers silently expire without sending REJECT_PROPOSAL.
         Parses seller response to verify if seller accepted the order or rejected it (due to out-of-stock race condition).
         """
-        url = self.endpoints.get(wholesaler_id)
-        msg_type = decision_msg.get("message_type", "DECISION")
-
-        if not url:
+        urls = self._get_wholesaler_urls(wholesaler_id)
+        if not urls:
             return {"status": "ERROR", "message": f"No endpoint for {wholesaler_id}"}
+
+        msg_type = decision_msg.get("message_type", "DECISION")
 
         # Zgodnie z oficjalną specyfikacją protokołu A2A (zasada milczenia),
         # kupujący NIE wysyła REJECT_PROPOSAL do sprzedawców (oferty milcząco wygasają).
@@ -390,83 +611,104 @@ class WholesalerMCPClient:
                 "message": "Silent expiry - no rejection sent to seller per A2A protocol.",
             }
 
-        try:
-            async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
+        item_raw = decision_msg.get("item", {})
+        item_name = item_raw.get("name", "") if isinstance(item_raw, dict) else ""
+        quantity = item_raw.get("quantity", 0) if isinstance(item_raw, dict) else 0
 
-                    tools_list = await session.list_tools()
-                    tool_names = [t.name for t in tools_list.tools]
+        for url in urls:
+            try:
+                async with sse_client(url, timeout=self.timeout) as (read_stream, write_stream):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
 
-                    candidate_tools = ["accept_offer", "accept_proposal", "confirm_order", "finalize_order"]
-                    chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
+                        tools_list = await session.list_tools()
+                        tool_names = [t.name for t in tools_list.tools]
 
-                    if not chosen_tool:
-                        logger.info(
-                            f"[MCP_CLIENT] Candidate tool names not found on {wholesaler_id} for {msg_type}. "
-                            "Checking tool descriptions on MCP server via LLM..."
+                        candidate_tools = ["accept_offer", "accept_proposal", "confirm_order", "finalize_order"]
+                        chosen_tool = next((t for t in candidate_tools if t in tool_names), None)
+
+                        if not chosen_tool:
+                            logger.info(
+                                f"[MCP_CLIENT] Candidate tool names not found on {wholesaler_id} for {msg_type}. "
+                                "Checking tool descriptions on MCP server via LLM..."
+                            )
+                            chosen_tool = self._resolve_tool_with_llm(
+                                tools=tools_list.tools,
+                                task_intent="Złożenie zamówienia lub akceptacja oferty zakupu (accept_offer)",
+                            )
+
+                        if not chosen_tool:
+                            chosen_tool = "accept_offer"
+
+                        chosen_tool_obj = next((t for t in tools_list.tools if getattr(t, "name", None) == chosen_tool), None)
+                        tool_args = self._build_call_arguments(
+                            tool_obj=chosen_tool_obj,
+                            wholesaler_id=wholesaler_id,
+                            item_name=item_name,
+                            quantity=quantity,
+                            action="DECISION",
+                            decision_msg=decision_msg,
                         )
-                        chosen_tool = self._resolve_tool_with_llm(
-                            tools=tools_list.tools,
-                            task_intent="Złożenie zamówienia lub akceptacja oferty zakupu (accept_offer)",
+
+                        result = await session.call_tool(chosen_tool, arguments=tool_args)
+
+                        raw_text = (
+                            result.content[0].text
+                            if (result.content and hasattr(result.content[0], "text"))
+                            else (str(result.content[0]) if result.content else "")
                         )
 
-                    if not chosen_tool:
-                        chosen_tool = "accept_offer"
+                        resp_dict: Dict[str, Any] = {}
+                        if raw_text:
+                            try:
+                                resp_dict = json.loads(raw_text)
+                            except Exception:
+                                import ast
+                                try:
+                                    resp_dict = ast.literal_eval(raw_text)
+                                except Exception:
+                                    resp_dict = {"raw": raw_text}
 
-                    result = await session.call_tool(chosen_tool, arguments={"decision_data": decision_msg})
-
-                    raw_text = (
-                        result.content[0].text
-                        if (result.content and hasattr(result.content[0], "text"))
-                        else (str(result.content[0]) if result.content else "")
-                    )
-
-                    resp_dict: Dict[str, Any] = {}
-                    if raw_text:
-                        try:
-                            resp_dict = json.loads(raw_text)
-                        except Exception:
-                            resp_dict = {"raw": raw_text}
-
-                    is_reject = (
-                        resp_dict.get("message_type") == "REJECT_PROPOSAL"
-                        or resp_dict.get("status") in ("REJECTED", "ERROR", "OUT_OF_STOCK")
-                        or resp_dict.get("rejected") is True
-                    )
-
-                    if is_reject:
-                        logger.warning(
-                            f"[MCP_CLIENT] Wholesaler {wholesaler_id} REJECTED accept_offer! Detail: {resp_dict}"
+                        is_reject = (
+                            resp_dict.get("message_type") == "REJECT_PROPOSAL"
+                            or resp_dict.get("status") in ("REJECTED", "ERROR", "OUT_OF_STOCK")
+                            or resp_dict.get("rejected") is True
                         )
-                        return {
-                            "status": "REJECTED",
-                            "wholesaler_id": wholesaler_id,
-                            "message_type": "REJECT_PROPOSAL",
-                            "response": resp_dict,
-                            "acknowledged": False,
-                            "reason": resp_dict.get("reason", "OUT_OF_STOCK"),
-                        }
-                    else:
-                        logger.info(
-                            f"[MCP_CLIENT] Wholesaler {wholesaler_id} accepted the order: {resp_dict}"
-                        )
-                        return {
-                            "status": "ACCEPTED",
-                            "wholesaler_id": wholesaler_id,
-                            "message_type": resp_dict.get("message_type", "ACCEPT_PROPOSAL"),
-                            "response": resp_dict,
-                            "acknowledged": True,
-                        }
-        except Exception as e:
-            logger.warning(f"[MCP_CLIENT] Could not send {msg_type} to {wholesaler_id}: {e}")
-            return {
-                "status": "NOTICE",
-                "wholesaler_id": wholesaler_id,
-                "message_type": msg_type,
-                "acknowledged": False,
-                "detail": str(e),
-            }
+
+                        if is_reject:
+                            logger.warning(
+                                f"[MCP_CLIENT] Wholesaler {wholesaler_id} REJECTED accept_offer! Detail: {resp_dict}"
+                            )
+                            return {
+                                "status": "REJECTED",
+                                "wholesaler_id": wholesaler_id,
+                                "message_type": "REJECT_PROPOSAL",
+                                "response": resp_dict,
+                                "acknowledged": False,
+                                "reason": resp_dict.get("reason", "OUT_OF_STOCK"),
+                            }
+                        else:
+                            logger.info(
+                                f"[MCP_CLIENT] Wholesaler {wholesaler_id} accepted the order: {resp_dict}"
+                            )
+                            return {
+                                "status": "ACCEPTED",
+                                "wholesaler_id": wholesaler_id,
+                                "message_type": resp_dict.get("message_type", "ACCEPT_PROPOSAL"),
+                                "response": resp_dict,
+                                "acknowledged": True,
+                            }
+            except Exception as e:
+                logger.warning(f"[MCP_CLIENT] Could not send {msg_type} to {wholesaler_id} ({url}): {e}")
+                continue
+
+        return {
+            "status": "NOTICE",
+            "wholesaler_id": wholesaler_id,
+            "message_type": msg_type,
+            "acknowledged": False,
+            "detail": f"All connection attempts to {wholesaler_id} failed",
+        }
 
     # Synchronous helper methods
     def check_availability(self, wholesaler_id: str, item_name: str, quantity: int) -> Dict[str, Any]:

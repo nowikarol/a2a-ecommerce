@@ -3,7 +3,10 @@ import sys
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.mcpserver import MCPServer as FastMCP
+except ImportError:
+    from mcp.server.fastmcp import FastMCP
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 

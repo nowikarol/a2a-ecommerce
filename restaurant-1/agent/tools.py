@@ -401,10 +401,10 @@ class RestaurantAgent:
                     rem_qty = w["remaining_quantity"]
                     thresh = w["safety_threshold"]
                     reorder_qty = w["reorder_quantity"]
-                    order_qty = max(reorder_qty, (thresh - rem_qty) + reorder_qty)
+                    order_qty = reorder_qty
                     logger.info(
                         f"[INVENTORY:AUTO_REORDER] Stock of '{item_name}' ({rem_qty}) <= safety threshold ({thresh}). "
-                        f"Auto-triggering procurement of {order_qty} units..."
+                        f"Auto-triggering procurement of {order_qty} units (reorder_quantity)..."
                     )
                     try:
                         reorder_res = self.request_quotes_and_evaluate(
@@ -940,7 +940,7 @@ class RestaurantAgent:
             current_qty = item_data.get("quantity", 0)
             threshold = item_data.get("safety_threshold", 15)
             reorder_qty = item_data.get("reorder_quantity", 30)
-            order_qty = max(reorder_qty, (threshold - current_qty) + reorder_qty)
+            order_qty = reorder_qty
 
             rfps_for_item = []
             for wh in wholesalers:
