@@ -1,6 +1,6 @@
 """
-Groq API-powered Agent Brain for Restaurant 1 (restaurant-1).
-Implements LLM tool-calling loop using Groq SDK and maps results to docs/schemas/.
+Gemini (Google AI Studio) powered Agent Brain for Restaurant 1 (restaurant-1).
+Implements LLM tool-calling loop using Google AI Studio OpenAI-compatible endpoint and maps results to docs/schemas/.
 """
 
 import argparse
@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional
 
-from groq import Groq
+from openai import OpenAI
 
 CURRENT_DIR = Path(__file__).resolve().parent
 RESTAURANT_DIR = CURRENT_DIR.parent
@@ -20,7 +20,7 @@ if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
 import config
-from agent.tools import GROQ_TOOLS, RestaurantAgent, default_agent, execute_tool
+from agent.tools import GEMINI_TOOLS, RestaurantAgent, default_agent, execute_tool
 
 logger = logging.getLogger("restaurant-1.agent")
 
@@ -53,7 +53,7 @@ Zawsze korzystaj z dostępnych narzędzi, aby badać stan faktyczny magazynu ora
 
 class RestaurantBrain:
     """
-    LLM Brain for Restaurant 1 powered by Groq API.
+    LLM Brain for Restaurant 1 powered by Google AI Studio (Gemini).
     """
 
     def __init__(
@@ -63,54 +63,74 @@ class RestaurantBrain:
         agent_backend: Optional[RestaurantAgent] = None,
         max_memory_messages: Optional[int] = None,
     ):
-        self.api_key = api_key or config.GROQ_API_KEY
-        self.model = model or config.GROQ_MODEL
+        self.api_key = api_key or config.GEMINI_API_KEY
+        self.model = model or config.GEMINI_MODEL
+        self.fallback_model = config.FALLBACK_MODEL
         self.agent_backend = agent_backend or default_agent
         self.max_memory_messages = (
             max_memory_messages if max_memory_messages is not None else config.MAX_MEMORY_MESSAGES
         )
         self.conversation_memory: List[Dict[str, str]] = []
-        self.client: Optional[Groq] = None
+        self.client: Optional[OpenAI] = None
 
-        if self.api_key and self.api_key != "twoj_klucz_groq":
+        if self.api_key and self.api_key != "twoj_klucz_gemini":
             try:
-                self.client = Groq(api_key=self.api_key)
-                logger.info(f"[{config.AGENT_ID}] Initialized Groq client with model '{self.model}'")
+                self.client = OpenAI(
+                    base_url=config.GEMINI_BASE_URL,
+                    api_key=self.api_key,
+                )
+                logger.info(f"[{config.AGENT_ID}] Initialized Gemini client with model '{self.model}'")
             except Exception as e:
-                logger.error(f"[{config.AGENT_ID}] Failed to initialize Groq client: {e}")
+                logger.error(f"[{config.AGENT_ID}] Failed to initialize Gemini client: {e}")
                 self.client = None
         else:
             logger.warning(
-                f"[{config.AGENT_ID}] No valid GROQ_API_KEY configured. "
-                "Set GROQ_API_KEY in .env or environment to enable real LLM inference."
+                f"[{config.AGENT_ID}] No valid GEMINI_API_KEY configured. "
+                "Set GEMINI_API_KEY in .env or environment to enable real LLM inference."
             )
 
     def run_conversation(
         self, messages: List[Dict[str, Any]], max_iterations: int = 8
     ) -> List[Dict[str, Any]]:
         """
-        Executes a multi-turn tool-calling conversation loop with Groq API.
+        Executes a multi-turn tool-calling conversation loop with Gemini API.
         """
         if not self.client:
             raise RuntimeError(
-                "Groq client is not configured. Please supply a valid GROQ_API_KEY in .env or constructor."
+                "Gemini client is not configured. Please supply a valid GEMINI_API_KEY in .env or constructor."
             )
 
         current_messages = list(messages)
+        active_model = self.model
 
         for step in range(max_iterations):
-            logger.debug(f"[Groq:Loop] Iteration {step + 1}/{max_iterations}")
+            logger.debug(f"[Gemini:Loop] Iteration {step + 1}/{max_iterations}")
 
             try:
                 response = self.client.chat.completions.create(
-                    model=self.model,
+                    model=active_model,
                     messages=current_messages,
-                    tools=GROQ_TOOLS,
+                    tools=GEMINI_TOOLS,
                     tool_choice="auto",
                 )
             except Exception as e:
-                logger.error(f"[Groq:Error] Chat completion failed: {e}")
-                raise
+                err_str = str(e)
+                if active_model != self.fallback_model and any(
+                    code in err_str for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "RateLimitError")
+                ):
+                    logger.warning(
+                        f"[Gemini:Failover] Model '{active_model}' returned limit/error ({e}); switching to fallback '{self.fallback_model}'"
+                    )
+                    active_model = self.fallback_model
+                    response = self.client.chat.completions.create(
+                        model=active_model,
+                        messages=current_messages,
+                        tools=GEMINI_TOOLS,
+                        tool_choice="auto",
+                    )
+                else:
+                    logger.error(f"[Gemini:Error] Chat completion failed: {e}")
+                    raise
 
             choice = response.choices[0]
             msg = choice.message
@@ -118,33 +138,55 @@ class RestaurantBrain:
 
             # If no tool calls, append final assistant reply and stop
             if not tool_calls:
-                current_messages.append({"role": "assistant", "content": msg.content or ""})
-                logger.debug("[Groq:Loop] Assistant finished without tool calls.")
+                current_messages.append({"role": "assistant", "content": getattr(msg, "content", "") or ""})
+                logger.debug("[Gemini:Loop] Assistant finished without tool calls.")
                 break
 
             # Append assistant message with tool calls to conversation history
-            assistant_turn = {
-                "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            }
+            # Using model_dump() preserves thought_signature required by Gemini reasoning models
+            assistant_turn = None
+            if hasattr(msg, "model_dump") and callable(msg.model_dump):
+                try:
+                    dumped = msg.model_dump(exclude_none=True)
+                    if isinstance(dumped, dict) and isinstance(dumped.get("role"), str):
+                        assistant_turn = dumped
+                except Exception:
+                    assistant_turn = None
+
+            if assistant_turn is None:
+                assistant_turn = {
+                    "role": "assistant",
+                    "content": getattr(msg, "content", "") or "",
+                    "tool_calls": [
+                        {
+                            "id": getattr(tc, "id", f"call_{idx}"),
+                            "type": "function",
+                            "function": {
+                                "name": getattr(getattr(tc, "function", None), "name", ""),
+                                "arguments": getattr(getattr(tc, "function", None), "arguments", "{}"),
+                            },
+                            **(
+                                {"extra_content": getattr(tc, "extra_content")}
+                                if hasattr(tc, "extra_content")
+                                else {}
+                            ),
+                        }
+                        for idx, tc in enumerate(tool_calls)
+                    ],
+                }
             current_messages.append(assistant_turn)
 
             # Execute each tool call and append corresponding tool role message
             for tc in tool_calls:
-                func_name = tc.function.name
-                func_args = tc.function.arguments
-                logger.info(f"[Groq:ToolCall] Executing: {func_name}({func_args})")
+                func_name = getattr(getattr(tc, "function", None), "name", None) or (
+                    tc.get("function", {}).get("name") if isinstance(tc, dict) else ""
+                )
+                func_args = getattr(getattr(tc, "function", None), "arguments", None) or (
+                    tc.get("function", {}).get("arguments") if isinstance(tc, dict) else "{}"
+                )
+                tc_id = getattr(tc, "id", None) or (tc.get("id") if isinstance(tc, dict) else "")
+
+                logger.info(f"[Gemini:ToolCall] Executing: {func_name}({func_args})")
 
                 tool_result_str = execute_tool(
                     name=func_name,
@@ -154,7 +196,7 @@ class RestaurantBrain:
 
                 tool_message = {
                     "role": "tool",
-                    "tool_call_id": tc.id,
+                    "tool_call_id": tc_id,
                     "name": func_name,
                     "content": tool_result_str,
                 }
@@ -210,10 +252,10 @@ class RestaurantBrain:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Restaurant 1 Groq Agent Brain")
+    parser = argparse.ArgumentParser(description="Restaurant 1 Gemini Agent Brain")
     parser.add_argument("--prompt", type=str, help="Prompt to send to the agent")
     parser.add_argument("--audit", action="store_true", help="Run autonomous inventory audit")
-    parser.add_argument("--model", type=str, default=config.GROQ_MODEL, help="Groq model override")
+    parser.add_argument("--model", type=str, default=config.GEMINI_MODEL, help="Gemini model override")
     parser.add_argument(
         "--memory-size",
         type=int,
@@ -224,13 +266,13 @@ def main():
 
     brain = RestaurantBrain(model=args.model, max_memory_messages=args.memory_size)
 
-    if not config.is_groq_configured():
-        print("\n[OSTRZEŻENIE] GROQ_API_KEY nie jest skonfigurowany lub posiada wartość domyślną.")
-        print("Ustaw swój klucz w pliku restaurant-1/.env (na bazie .env.example).\n")
+    if not config.is_gemini_configured():
+        print("\n[OSTRZEŻENIE] GEMINI_API_KEY nie jest skonfigurowany lub posiada wartość domyślną.")
+        print("Ustaw swój klucz w pliku restaurant-1/.env.\n")
         return
 
     if args.audit:
-        print(f"[R1 Agent] Uruchamianie autonomicznego audytu z modelem '{brain.model}'...")
+        print(f"[R1 Agent] Uruchamianie autonomicznego audytu z modelem Gemini '{brain.model}'...")
         answer = brain.run_autonomous_audit()
         print("\nOdpowiedź Agenta:")
         print(answer)
@@ -241,7 +283,7 @@ def main():
         print(answer)
     else:
         print(
-            f"[R1 Agent] Tryb interaktywny z modelem '{brain.model}'. "
+            f"[R1 Agent] Tryb interaktywny z modelem Gemini '{brain.model}'. "
             f"Pamięć konwersacji: do {brain.max_memory_messages} ostatnich wiadomości.\n"
             "Wpisz 'clear' lub 'reset' aby wyczyścić pamięć, 'exit' aby zakończyć.\n"
         )

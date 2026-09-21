@@ -1,7 +1,7 @@
 """
-Tools registry and Groq function-calling definitions for Restaurant 1 (restaurant-1).
+Tools registry and Gemini function-calling definitions for Restaurant 1 (restaurant-1).
 Backed by SQLite relational database with ACID transactions and pure SQL queries.
-Conforms to docs/schemas/ and OpenAI/Groq function calling format.
+Conforms to docs/schemas/ and Google AI Studio / Gemini function calling format.
 """
 
 import json
@@ -986,10 +986,10 @@ default_agent = RestaurantAgent()
 
 
 # ============================================================================
-# Groq Function-Calling Tools Specification (OpenAI / Groq format)
+# Gemini Function-Calling Tools Specification (Google AI Studio / Gemini format)
 # ============================================================================
 
-GROQ_TOOLS: List[Dict[str, Any]] = [
+GEMINI_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {

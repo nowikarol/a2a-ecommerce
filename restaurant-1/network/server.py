@@ -70,7 +70,12 @@ def main():
         default="stdio",
         help="MCP transport protocol (default: stdio)",
     )
-    parser.add_argument("--port", type=int, default=8011, help="Port for SSE/HTTP transports (default: 8011)")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=getattr(config, "PORT", 8002),
+        help=f"Port for SSE/HTTP transports (default: {getattr(config, 'PORT', 8002)})",
+    )
     args = parser.parse_args()
 
     logger.info(f"[restaurant-1] Starting public A2A MCP server on transport='{args.transport}' (port={args.port})...")
