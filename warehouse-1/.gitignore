@@ -1,0 +1,14 @@
+# Pliki bazy danych
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+
+# Środowisko wirtualne i cache Pythona
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Klucze i konfiguracja
+.env

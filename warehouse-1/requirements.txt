@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+fastmcp
+httpx
+pydantic
+langchain 
+langchain-google-genai l
+anggraph 
+python-dotenv
