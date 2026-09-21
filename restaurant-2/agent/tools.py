@@ -39,10 +39,8 @@ async def sprawdz_dostepnosc_w_hurtowniach(produkt: str, ilosc: int) -> str:
     raport = f"STATUS DOSTĘPNOŚCI: {ilosc}x {produkt} ---\n"
     dostepne_hurtownie = [] 
 
-    # Iteracja po słowniku hurtowni (np. H1, H2) i ich adresach.
-    for id_h, url in URL_HURTOWNI.items():
-        if not url: continue
-
+    async def _sprawdz_pojedyncza(id_h: str, url: str) -> tuple[str, str, bool]:
+        """Asynchroniczna funkcja pomocnicza do zapytania pojedynczej hurtowni."""
         # Użycie modelu Pydantic do zbudowania poprawnego JSON-a zgodnego ze schematem.
         request = AvailabilityRequest(
             receiver_id=id_h,
@@ -60,19 +58,43 @@ async def sprawdz_dostepnosc_w_hurtowniach(produkt: str, ilosc: int) -> str:
         )
 
         if str(surowa_odpowiedz).startswith("Błąd sieciowy"):
-            raport += f"Hurtownia {id_h}: SERWER WYŁĄCZONY (Brak połączenia).\n"
-            continue
+            return id_h, f"Hurtownia {id_h}: SERWER WYŁĄCZONY (Brak połączenia).\n", False
 
         try:
             # Próba odczytania tekstowej odpowiedzi serwera jako struktury JSON.
             odpowiedz_json = json.loads(surowa_odpowiedz)
             if odpowiedz_json.get("is_available") is True:
-                raport += f"Hurtownia {id_h}: Posiada towar.\n"
-                dostepne_hurtownie.append(id_h) # Zapisujemy hurtownię jako "dostępną" na później
+                return id_h, f"Hurtownia {id_h}: Posiada towar.\n", True
             else:
-                raport += f"Hurtownia {id_h}: Brak towaru w tej ilości.\n"
+                return id_h, f"Hurtownia {id_h}: Brak towaru w tej ilości.\n", False
         except json.JSONDecodeError:
-            raport += f"Hurtownia {id_h}: Błąd komunikacji (niezgodność z JSON).\n"
+            return id_h, f"Hurtownia {id_h}: Błąd komunikacji (niezgodność z JSON).\n", False
+
+    # Zamiast iterować sekwencyjnie, budujemy listę zadań dla wszystkich skonfigurowanych adresów.
+    zadania = [
+        _sprawdz_pojedyncza(id_h, url)
+        for id_h, url in URL_HURTOWNI.items()
+        if url
+    ]
+
+    if not zadania:
+        raport += "\nUWAGA: Brak skonfigurowanych adresów hurtowni w systemie."
+        return raport
+
+    # Równoległe wykonanie wszystkich zapytań do hurtowni w tym samym czasie.
+    wyniki = await asyncio.gather(*zadania, return_exceptions=True)
+
+    # Przetwarzanie zebranych wyników
+    for wynik in wyniki:
+        if isinstance(wynik, Exception):
+            raport += f"Błąd wykonania zapytania: {wynik}\n"
+            continue
+        
+        id_h, wiadomosc, jest_dostepne = wynik
+        raport += wiadomosc
+        
+        if jest_dostepne:
+            dostepne_hurtownie.append(id_h) # Zapisujemy hurtownię jako "dostępną" na później
 
     if not dostepne_hurtownie:
         raport += "\nUWAGA: Żadna hurtownia nie ma tego towaru na stanie! Przerwij proces zakupowy."
@@ -118,33 +140,49 @@ def oblicz_braki_dla_dania(nazwa_dania: str, ilosc_porcji: int) -> str:
 
 @tool
 async def zbierz_oferty_z_hurtowni(produkt: str, ilosc: int, dostepne_hurtownie: list[str]) -> str:
-    """Wysyła zapytanie ofertowe (CALL_FOR_PROPOSAL) TYLKO do wskazanych hurtowni."""
+    """Wysyła zapytanie ofertowe (CALL_FOR_PROPOSAL) równolegle TYLKO do wskazanych hurtowni."""
     raport = f"--- ZEBRANE OFERTY DLA {ilosc}x {produkt} ---\n"
-    
-    for id_h, url in URL_HURTOWNI.items():
-        # Zabezpieczenie: wysyłamy zapytanie o cenę tylko do tych, co zgłosili dostępność towaru
-        if id_h not in dostepne_hurtownie: 
-            continue
-        if not url: continue
 
+    async def _pobierz_oferte(id_h: str, url: str) -> tuple[str, str]:
+        """Asynchroniczne zapytanie do pojedynczej hurtowni."""
         proposal = CallForProposal(
             receiver_id=id_h,
             item=Item(name=produkt, quantity=ilosc)
         )
         argumenty = proposal.model_dump()
-       
+
         surowa_odpowiedz = await wywolaj_zdalne_narzedzie(
-            url=url, 
-            domyslna_nazwa="request_offer", 
+            url=url,
+            domyslna_nazwa="request_offer",
             intencja="Złożenie zapytania ofertowego (CALL FOR PROPOSAL) i pobranie wyceny towaru",
             argumenty=argumenty
         )
-        
+        return id_h, surowa_odpowiedz
+
+    # Budujemy listę zadań asynchronicznych tylko dla dostępnych hurtowni
+    zadania = [
+        _pobierz_oferte(id_h, url)
+        for id_h, url in URL_HURTOWNI.items()
+        if id_h in dostepne_hurtownie and url
+    ]
+
+    if not zadania:
+        return raport + "Brak hurtowni spełniających kryteria dostępności."
+
+    # Równoległe wykonanie wszystkich zapytań
+    wyniki = await asyncio.gather(*zadania, return_exceptions=True)
+
+    for wynik in wyniki:
+        if isinstance(wynik, Exception):
+            raport += f"Błąd wykonania zapytania: {wynik}\n"
+            continue
+
+        id_h, surowa_odpowiedz = wynik
         if "Błąd" in surowa_odpowiedz or "REJECT_PROPOSAL" in surowa_odpowiedz:
             raport += f"Hurtownia {id_h}: Odrzuciła zapytanie lub wystąpił błąd.\n"
         else:
             raport += f"Hurtownia {id_h}: Zwróciła wycenę:\n{surowa_odpowiedz}\n"
-            
+
     return raport
 
 @tool

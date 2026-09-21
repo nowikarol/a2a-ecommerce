@@ -18,8 +18,8 @@ logger = logging.getLogger("R2_CLIENT")
 load_dotenv() # Wczytuje zmienne środowiskowe z pliku .env do pamięci programu
 
 URL_HURTOWNI = {
-    "H1": os.getenv("H1_MCP_URL", "http://127.0.0.1:8001/sse"),
-    "H2": os.getenv("H2_MCP_URL", "http://127.0.0.1:8002/sse")
+    "H1": os.getenv("H1_MCP_URL", "http://127.0.0.1:8004/sse"),
+    "H2": os.getenv("H2_MCP_URL", "http://127.0.0.1:8005/sse")
 }
 
 async def dopasuj_narzedzie_llm(dostepne_narzedzia: list, intencja: str) -> str:

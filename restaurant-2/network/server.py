@@ -75,8 +75,8 @@ def receive_delivery(delivery_data: dict) -> str:
 
 def run_mcp_server():
     """Uruchamia serwer MCP lokalnie na protokole SSE."""
-    logger.info("Uruchomiono lokalny serwer MCP na porcie 8000 (adres: http://127.0.0.1:8000/sse)")
-    mcp.run(transport="sse", host="0.0.0.0", port=8000)
+    logger.info("Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)")
+    mcp.run(transport="sse", host="0.0.0.0", port=8003)
 
 if __name__ == '__main__':
     from dotenv import load_dotenv
