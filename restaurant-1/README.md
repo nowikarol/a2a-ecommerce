@@ -60,6 +60,7 @@ restaurant-1/
 │   ├── __init__.py
 │   └── test_restaurant.py        # 50 testów jednostkowych i integracyjnych (pytest)
 │
+├── main.py                       # Zintegrowane REST API (FastAPI) i serwer MCP na porcie 8002
 ├── config.py                     # Centralna konfiguracja środowiska, modeli i ścieżek
 ├── requirements.txt              # Zależności projektu
 ├── README.md                     # Dokumentacja architektury
@@ -144,16 +145,31 @@ python restaurant-1/agent/agent.py
 
 ## 🚀 Uruchomienie i Testy
 
-### 1. Uruchomienie publicznego serwera MCP:
+### 1. Uruchomienie zintegrowanego serwera FastAPI + MCP (dla Orkiestratora i dostawców B2B):
 ```bash
-python restaurant-1/network/server.py
+python restaurant-1/main.py
 ```
-*(Domyślny transport: stdio, obsługa SSE przez `--transport sse --port 8002`)*
+* **Swagger UI (przeglądarka):** [http://127.0.0.1:8002/docs](http://127.0.0.1:8002/docs)
+* **Sterowanie przez Orkiestrator (REST API):**
+  ```bash
+  curl -X POST http://127.0.0.1:8002/chat \
+    -H "Content-Type: application/json" \
+    -d '{"prompt": "Przygotuj 2x margherita_classica"}'
+  ```
+  *(Obsługuje zarówno format H1/R1: `{"prompt": "..."}`, jak i format R2: `{"polecenie": "..."}`).*
+* **Ustrukturyzowany stan w JSON (dla Orkiestratora):** `GET http://127.0.0.1:8002/status`
+* **Punkt styku MCP dla hurtowni (odbiór dostaw):** `http://127.0.0.1:8002/sse`
 
-### 2. Autonomiczny audyt i zaopatrzenie spiżarni (CLI Agenta):
+### 2. Standalone serwer MCP (konsola):
+```bash
+python restaurant-1/network/server.py --transport sse --port 8002
+```
+
+### 3. Autonomiczny audyt i zaopatrzenie spiżarni (CLI Agenta):
 ```bash
 python restaurant-1/agent/agent.py --audit
 ```
+*(lub interaktywny czat w konsoli: `python restaurant-1/agent/agent.py`)*
 
 ### 3. Inspekcja bazy danych SQLite (spiżarnia, receptury, portfel, transakcje):
 ```bash
