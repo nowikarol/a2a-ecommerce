@@ -329,6 +329,7 @@ async def accept_offer(
     try:
         buyer_url = get_node_url(sender_id)
         async with Client(buyer_url) as buyer_client:
+            #wywołanie receive_delivery w hurtowni
             await buyer_client.call_tool("receive_delivery", arguments=delivery_message)
     except Exception as exc:
         # Towar już fizycznie zdjęty ze stanu i transakcja zapisana u nas -
