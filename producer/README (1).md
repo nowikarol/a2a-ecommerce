@@ -31,10 +31,10 @@ W przeciwieństwie do modularnej architektury `restaurant-1` (podział na `data/
 
 ```text
 factory-f1/
-├── MCP_server.py        # Serwer MCP (FastMCP, SSE, port 8000) — wycena i dostępność
+├── mcp_server.py        # Serwer MCP (FastMCP, SSE, port 8000) — wycena i dostępność
 ├── agent_server.py      # Agent A2A (FastAPI, port 8001) + Gemini + tunel ngrok
-├── SQL_init.py          # Tworzenie i seedowanie bazy SQLite (factory.db)
-├── start_all.bat    # Launcher: uruchamia oba serwery i pokazuje adres ngrok
+├── setup_db.py          # Tworzenie i seedowanie bazy SQLite (factory.db)
+├── start_servers.bat    # Launcher: uruchamia oba serwery i pokazuje adres ngrok
 ├── factory.db           # Plik bazy danych SQLite (generowany przez setup_db.py)
 ├── ngrok_url.txt         # Publiczny adres MCP wygenerowany przy starcie (auto)
 └── .env                  # Zmienne środowiskowe (GEMINI_API_KEY, NGROK_*)
@@ -120,10 +120,10 @@ Skrypt:
 ### Ręcznie
 ```bash
 # 1. Utworzenie i zaseedowanie bazy danych
-python SQL_init.py
+python setup_db.py
 
 # 2. Uruchomienie serwera MCP (port 8000)
-python MCP_server.py
+python mcp_server.py
 
 # 3. W osobnym terminalu — uruchomienie agenta A2A + tunel ngrok (port 8001)
 python agent_server.py
