@@ -8,7 +8,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langchain_core.runnables import RunnableConfig
 import langchain_google_genai
 from random import randint
-import mysql.connector
+from langchain_google_genai import ChatGoogleGenerativeAI
+import pymysql.cursors
 from connections import get_product,get_connection
 from scheam import (Item, Delivery, Accept_Offer, Reject, 
                     Request_Offer, Response_Offer,Availability_Request, 
@@ -48,16 +49,12 @@ def products_status() -> list[Item]:
     """
     connection = get_connection()
     try:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor()
         cursor.execute(
-            "SELECT name, quantity, price FROM warehouse"
+            "SELECT name, quantity, price FROM warehouse2"
         )
         rows = cursor.fetchall()
-        return [ Item(
-            name=item["name"],
-            quantity=item["quantity"],
-            price=item["price"])
-            for item in rows]
+        return [f"{item[0]}: {item[1]}" for item in rows]
     finally:
         cursor.close()
         connection.close()
@@ -85,7 +82,7 @@ def accept_offer_from_producer(Proposal:Response_Offer) -> Accept_Offer:
     total_cost=quantity*price
     connection=get_connection()
     try:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor()
         cursor.execute("SELECT ballance FROM wallet_warehouse2 ORDER BY id DESC LIMIT 1")
         row = cursor.fetchone()
         current_balance = row["ballance"]
@@ -114,9 +111,12 @@ def accept_offer_from_producer(Proposal:Response_Offer) -> Accept_Offer:
         total_cost=total_cost)
 
 tools = [stock_info, products_status, get_proposal, accept_offer_from_producer]
-
+llm = ChatGoogleGenerativeAI(
+    model="gemini-3.1-flash-lite",
+    max_retries=5,             
+)
 agent = create_agent(
-    model="google_genai:gemini-3.1-flash-lite",
+    model=llm,
     system_prompt=SYSTEM_PROMPT,
     tools=tools,
     checkpointer=InMemorySaver(),
