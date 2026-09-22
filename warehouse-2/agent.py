@@ -16,8 +16,12 @@ from scheam import (Item, Delivery, Accept_Offer, Reject,
                     Availability_Response)
 from fastmcp import FastMCP
 from connections import get_connection, get_product
+import httpx
+import logging
 
 
+
+logger = logging.getLogger("R2_CLIENT")
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 SYSTEM_PROMPT="""
@@ -59,18 +63,40 @@ def products_status() -> list[Item]:
         cursor.close()
         connection.close()
 
+PRODUCER_URL = {"P1":os.getenv("PRODUCER_URL", "http://127.0.0.1:8001//sse")}
+
 @tool
-def get_proposal(product:Item) -> Request_Offer:
+def get_proposal(item:Item) -> Request_Offer:
     """
-    Prepare request to buy specific product.
+    Prepare request to producer to buy a specific product.
     """
-    if product["name"] is None:
-        return stock_info(product.name)
-    return Request_Offer(
-        sender_id="P1",
-        reciver_id="H2",
+    request_Offer=Request_Offer(
+        sender_id="H2",
+        reciver_id="P1",
         message_type="CALL_FOR_PROPOSAL",
-        item=product)
+        item=item
+    )
+    if item["name"] is None:
+        return stock_info(item.name)
+    
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.post(PRODUCER_URL, json=request_Offer.model_dump())
+            data = response.json() 
+            return Response_Offer(
+                sender_id="H2",
+                receiver_id="P1",
+                message_type="PROPOSAL",
+                item=Item(
+                    name=data["item"]["name"],
+                    quantity=data["item"]["quantity"],
+                    price=data["item"]["price"]))
+    except Exception as exc:
+        return Reject(
+            sender_id="P1",
+            receiver_id="H2",
+            message_type="REJECT_PROPOSAL",
+            item=item)
     
 @tool
 def accept_offer_from_producer(Proposal:Response_Offer) -> Accept_Offer:
@@ -100,7 +126,7 @@ def accept_offer_from_producer(Proposal:Response_Offer) -> Accept_Offer:
         cursor.close()
         connection.close()
 
-    return Accept_Offer(
+    accept_Offer=Accept_Offer(
         sender_id="P1",
         receiver="H2",
         message_type="ACCEPT_PROPOSAL",
@@ -110,16 +136,21 @@ def accept_offer_from_producer(Proposal:Response_Offer) -> Accept_Offer:
             price=price),
         total_cost=total_cost)
 
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.post(PRODUCER_URL, json=accept_Offer.model_dump())
+            return response.json()
+    except Exception as exc:
+        return f"Błąd podczas wysyłania akceptacji do producenta: {exc}"
+
 tools = [stock_info, products_status, get_proposal, accept_offer_from_producer]
 llm = ChatGoogleGenerativeAI(
     model="gemini-3.1-flash-lite",
-    max_retries=5,             
-)
+    max_retries=5)
 agent = create_agent(
     model=llm,
     system_prompt=SYSTEM_PROMPT,
     tools=tools,
-    checkpointer=InMemorySaver(),
-)
+    checkpointer=InMemorySaver())
 config: RunnableConfig={"configurable":{"thread_id":"1"}}
 
