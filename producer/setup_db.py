@@ -136,13 +136,13 @@ def insert_sample_data(conn):
         ("flour", "Mąka pszenna", 2.50, 500.0, "kg"),
         ("passata", "Passata pomidorowa", 4.20, 200.0, "kg"),
         ("mozzarella", "Mozzarella w kulkach", 12.00, 100.0, "szt."),
-        ("parmigiano_reggiano", "Parmigiano Reggiano", 22.00, 80.0, "kg"),
+        ("parmigiano reggiano", "Parmigiano Reggiano", 22.00, 80.0, "kg"),
         ("burrata", "Burrata", 15.00, 60.0, "szt."),
         ("buffala", "Mleko bawole", 18.00, 40.0, "kg"),
-        ("prosciutto_cotto", "Prosciutto cotto", 14.00, 90.0, "kg"),
-        ("prosciutto_crudo", "Prosciutto crudo", 20.00, 70.0, "kg"),
+        ("prosciutto cotto", "Prosciutto cotto", 14.00, 90.0, "kg"),
+        ("prosciutto crudo", "Prosciutto crudo", 20.00, 70.0, "kg"),
         ("arugula", "Rukola", 8.00, 30.0, "kg"),
-        ("lambs_lettuce", "Roszponka", 9.50, 25.0, "kg"),
+        ("lamb's lettuce", "Roszponka", 9.50, 25.0, "kg"),
         ("salami", "Salami", 16.00, 50.0, "kg"),
     ]
     cursor.executemany("""
@@ -157,14 +157,14 @@ def insert_sample_data(conn):
         ("flour", (today + datetime.timedelta(days=3)).isoformat(), 200.0, "planned"),
         ("passata", (today + datetime.timedelta(days=2)).isoformat(), 50.0, "planned"),
         ("mozzarella", (today + datetime.timedelta(days=1)).isoformat(), 30.0, "planned"),
-        ("parmigiano_reggiano", (today + datetime.timedelta(days=4)).isoformat(), 40.0, "planned"),
+        ("parmigiano reggiano", (today + datetime.timedelta(days=4)).isoformat(), 40.0, "planned"),
         ("burrata", (today + datetime.timedelta(days=2)).isoformat(), 20.0, "planned"),
         ("buffala", (today + datetime.timedelta(days=3)).isoformat(), 25.0, "planned"),
-        ("prosciutto_cotto", (today + datetime.timedelta(days=5)).isoformat(), 30.0, "planned"),
-        ("prosciutto_crudo", (today + datetime.timedelta(days=6)).isoformat(), 20.0, "planned"),
+        ("prosciutto cotto", (today + datetime.timedelta(days=5)).isoformat(), 30.0, "planned"),
+        ("prosciutto crudo", (today + datetime.timedelta(days=6)).isoformat(), 20.0, "planned"),
         ("salami", (today + datetime.timedelta(days=2)).isoformat(), 15.0, "planned"),
         ("arugula", (today + datetime.timedelta(days=1)).isoformat(), 10.0, "planned"),
-        ("lambs_lettuce", (today + datetime.timedelta(days=2)).isoformat(), 10.0, "planned"),
+        ("lamb's lettuce", (today + datetime.timedelta(days=2)).isoformat(), 10.0, "planned"),
     ]
 
     # Resetujemy plan produkcji przed ponownym wstawieniem
