@@ -4,10 +4,7 @@ from scheam import (Item, Delivery, Accept_Offer, Reject,
 from fastmcp import FastMCP
 import os
 from fastapi import FastAPI
-import pymysql
 import logging
-import asyncio
-import uvicorn
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from connections import get_connection, get_product
@@ -135,8 +132,7 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
     """
     Sales a product from the warehouse, updates stock and wallet, finalyy finalizing the order. 
     """
-    accept_Offer = Accept_Offer(
-        sender_id=sender_id,
+    accept_Offer = Accept_Offer(sender_id=sender_id,
         receiver_id=receiver_id,
         message_type=message_type,
         item=item,
@@ -152,9 +148,7 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
             item=Item(
                 name=accept_Offer.item.name,
                 quantity=accept_Offer.item.quantity,
-                price=accept_Offer.item.price
-            )
-        )
+                price=accept_Offer.item.price))
 
     connection = None
     cursor = None
@@ -164,38 +158,35 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
 
     try:
         connection = get_connection()
-        cursor = connection.cursor(pymysql.cursors.DictCursor)
+        cursor = connection.cursor()
         cursor.execute(
             """
             UPDATE warehouse2
-            SET quantity = quantity - %s
-            WHERE LOWER(name) = LOWER(%s) AND quantity >= %s
-            """,
-            (quantity, name, quantity)
-        )
+            SET quantity = quantity - ?
+            WHERE LOWER(name) = LOWER(?) AND quantity >= ?
+            """,(quantity, name, quantity))
         connection.commit()
         logger.info(f"H2 sold {quantity} of {name}")
         cursor.execute(
             """
+            SELECT ballance FROM wallet_warehouse2
+            ORDER BY id DESC LIMIT 1
+            """)
+        wallet = cursor.fetchone()
+        balance = wallet["ballance"]
+        new_balance = balance + cost
+        cursor.execute(
+            """
             INSERT INTO wallet_warehouse2 (sender_id, receiver_id, type, ballance)
-            SELECT %s, 'H2', 'INCOME', COALESCE(MAX(ballance), 0) + %s
+            SELECT ?, 'H2', 'INCOME', ?
             FROM wallet_warehouse2
-            """, 
-            (accept_Offer.sender_id, cost)
-        )
+            """, (accept_Offer.sender_id, new_balance))
         connection.commit()
         logger.info(f"H2 earned {cost} PLN")
 
-    except Exception as e:
-        if connection:
-            connection.rollback()
-        logger.error(f"Problem with updating database {e}", exc_info=True)
-        raise e
     finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        cursor.close()
+        connection.close()
     delivery = Delivery(
         sender_id="H2",
         receiver_id=sender_id,
@@ -207,8 +198,6 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
         total_cost=cost)
     delivery_dict = delivery.model_dump() if hasattr(delivery, 'model_dump') else delivery.dict()
     await send_delivery_to_buyer(buyer_id=sender_id, delivery_payload={"delivery_data": delivery_dict})
-    
-    
     return Accept_Offer(
         sender_id="H2",
         receiver_id=accept_Offer.receiver_id,
@@ -218,13 +207,12 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
             quantity=accept_Offer.item.quantity,
             price=accept_Offer.item.price
         ),
-        total_cost=cost
-    )
+        total_cost=cost)
 
 # Warehouse as a buyer agent
 # Step 5 Agent updates products after new purchase
 @mcp.tool
-def receive_delivery_from_producer(Delivery:Delivery):
+def receive_delivery(Delivery:Delivery):
     '''
     Updates the warehouse stock based on the received products from the producer.
     '''
@@ -238,19 +226,25 @@ def receive_delivery_from_producer(Delivery:Delivery):
         cursor.execute(
             """
             UPDATE warehouse2
-            SET quantity = quantity + %s
-            WHERE name = %s
-            """,
-            (bought_quantity, product["name"]))
+            SET quantity = quantity + ?
+            WHERE name = ?
+            """,(bought_quantity, product["name"]))
         connection.commit()
         cursor.execute(
             """
-            INSERT INTO wallet_warehouse2 (sender_id,receiver_id,type,ballance)
-            SELECT "H2", %s, "EXPENSE", ballance - %s
-            FROM wallet_warehouse2
+            SELECT ballance FROM wallet_warehouse2
             ORDER BY id DESC LIMIT 1
-            """, (Delivery.sender_id,total_cost)
-            )
+            """
+        )
+        wallet = cursor.fetchone()
+        balance = wallet["ballance"]
+        new_balance = balance - total_cost
+
+        cursor.execute(
+            """
+            INSERT INTO wallet_warehouse2 (sender_id,receiver_id,type,ballance)
+            SELECT "H2", ?, "EXPENSE", ?
+            """, (Delivery.sender_id,new_balance))
         connection.commit()
     finally:
         cursor.close()
