@@ -20,14 +20,17 @@ def get_product(item: str):
         cursor.execute(
             """
             SELECT name, quantity, price
-            FROM warehouse2 WHERE name = ?
-            """,(item,),)
+            FROM warehouse2 WHERE LOWER(name) = LOWER(?)
+            """,
+            (item,),
+        )
         product = cursor.fetchone()
         if product is None:
             return None
-        return Item(name=product,
-                    quantity=0,
-                    price=0)
+        return dict(product)
     finally:
-        cursor.close()
-        connection.close()
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+

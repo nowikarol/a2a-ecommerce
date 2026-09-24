@@ -178,8 +178,7 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
         cursor.execute(
             """
             INSERT INTO wallet_warehouse2 (sender_id, receiver_id, type, ballance)
-            SELECT ?, 'H2', 'INCOME', ?
-            FROM wallet_warehouse2
+            VALUES (?, 'H2', 'INCOME', ?)
             """, (accept_Offer.sender_id, new_balance))
         connection.commit()
         logger.info(f"H2 earned {cost} PLN")
