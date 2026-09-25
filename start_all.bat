@@ -21,9 +21,8 @@ start "R1 - Restauracja1 (8002)" cmd /k "cd /d %BASE_DIR%restaurant-1 && python 
 timeout /t 1 /nobreak >nul
 
 :: --- R2: Restauracja 2 (port 8003) ---
-:: TODO: potwierdzic prawdziwy plik startowy (main.py? Projekt_A2A.py? network/server.py?)
 echo Uruchamianie R2 (Restauracja 2, :8003)...
-start "R2 - Restauracja2 (8003)" cmd /k "cd /d %BASE_DIR%restaurant-2 && python Projekt_A2A.py"
+start "R2 - Restauracja2 (8003)" cmd /c "cd /d %BASE_DIR%restaurant-2 && start_r2.bat"
 
 timeout /t 1 /nobreak >nul
 
