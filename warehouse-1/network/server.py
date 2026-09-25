@@ -23,7 +23,7 @@ load_dotenv(BASE_DIR / ".env")
 
 from data.models import TradeMessage, Item
 from data.sql_functions import db_get_product, db_get_all_products, db_process_sale_transaction
-from network.client import request_producer_proposal, accept_producer_proposal
+from network.client import check_producer_availability, request_producer_proposal, accept_producer_proposal
 
 AGENT_ID = "H1"
 
@@ -53,9 +53,8 @@ async def send_delivery_to_buyer(buyer_id: str, delivery_payload: dict):
     except Exception as error:
         logger.error(f"[DELIVERY ERROR -> {buyer_id}] Nie udało się dostarczyć towaru: {error}")
 
-
 async def trigger_auto_procurement(item_name: str):
-    """Automatyczne uzupełnianie zapasów po sprzedaży w przypadku spadku poniżej progu min_threshold."""
+    """Automatyczne uzupełnianie zapasów (jeśli nie ma docelowej ilości - bierze tyle, ile producent ma aktualnie na stanie)."""
     try:
         db_row = sql_funcs.db_get_product(item_name)
         if not db_row:
@@ -63,34 +62,46 @@ async def trigger_auto_procurement(item_name: str):
 
         current_qty = float(db_row["quantity"])
         threshold = float(db_row.get("min_threshold", 20.0))
+        unit = db_row.get("unit", "kg")
         
         if current_qty < threshold:
-            needed_qty = threshold - current_qty
-            if needed_qty <= 0:
-                needed_qty = 20.0
+            target_stock = threshold * 2.0
+            desired_qty = int(round(target_stock - current_qty))
+            if desired_qty <= 0:
+                desired_qty = int(round(threshold))
 
-            logger.info(f"[EVENT TRIGGER] Stan dla '{item_name}' wynosi {current_qty} kg (próg: {threshold} kg). Zamawianie {needed_qty} kg u P1...")
+            # Sprawdzamy realną dostępność u Producenta przed złożeniem zamówienia
+            avail_res = await check_producer_availability(buyer_id="H1", item_name=item_name, quantity=float(desired_qty))
+            available_qty = float(avail_res.get("available_quantity", 0.0))
             
-            prop = await request_producer_proposal(buyer_id="H1", item_name=item_name, quantity=needed_qty)
+            if available_qty <= 0:
+                logger.info(f"[BACKGROUND AUDIT] Producent nie ma obecnie na stanie '{item_name}'. Czekamy na odnowienie zapasów u P1.")
+                return
+
+            # Bierzemy to, co potrzebujemy, ale nie więcej niż producent ma w tej chwili (Best-Effort)
+            actual_qty = int(min(desired_qty, available_qty))
+            
+            logger.info(f"[BACKGROUND AUDIT] P1 ma {available_qty} {unit} (chcieliśmy {desired_qty}). Zamawiamy dostępną partię: {actual_qty} {unit}.")
+
+            prop = await request_producer_proposal(buyer_id="H1", item_name=item_name, quantity=float(actual_qty))
             if prop.get("message_type") == "PROPOSAL":
                 item_data = prop.get("item", {})
                 price = float(item_data.get("price", 0.0))
-                total_cost = float(prop.get("total_cost", price * needed_qty))
+                total_cost = float(prop.get("total_cost", price * actual_qty))
                 
                 res = await accept_producer_proposal(
                     buyer_id="H1", 
                     item_name=item_name, 
-                    quantity=needed_qty, 
+                    quantity=float(actual_qty), 
                     price=price, 
                     total_cost=total_cost
                 )
-                logger.info(f"[EVENT TRIGGER RESULT] {item_name}: {res.get('status', 'ACCEPTED')}")
+                logger.info(f"[BACKGROUND AUDIT RESULT] {item_name}: {res.get('status', 'ACCEPTED')}")
             else:
-                logger.warning(f"[EVENT TRIGGER REJECTED] Producent odrzucił zapytanie na {item_name}")
+                logger.warning(f"[BACKGROUND AUDIT REJECTED] Producent odrzucił zapytanie na {item_name}")
             
     except Exception as e:
-        logger.error(f"[EVENT TRIGGER ERROR] Błąd automatycznego zamawiania dla {item_name}: {e}")
-
+        logger.error(f"[BACKGROUND AUDIT ERROR] Błąd automatycznego zamawiania dla {item_name}: {e}")
 
 @mcp.tool()
 def get_inventory() -> str:
@@ -167,7 +178,6 @@ async def accept_offer(receiver_id: str, item: Item, total_cost: float, sender_i
     ).model_dump(mode="json")
     
     asyncio.create_task(send_delivery_to_buyer(buyer_id=sender_id, delivery_payload=delivery_payload))
-    asyncio.create_task(trigger_auto_procurement(item_name=item.name.strip()))
 
     return TradeMessage(
         sender_id=AGENT_ID, receiver_id=sender_id, message_type="ACCEPT_PROPOSAL",

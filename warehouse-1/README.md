@@ -92,7 +92,7 @@ Jego zadaniem jest monitorowanie sytuacji hurtowni i podejmowanie działań zwi�
 | `get_producer_proposal`      | Pobiera ofertę cenową od Producenta P1.                   |
 | `finalize_producer_purchase` | Sprawdza dostępne środki i finalizuje zakup u Producenta. |
 
-Agent wykonuje również **audyt startowy**, dzięki któremu może wykryć braki w magazynie już podczas uruchamiania systemu.
+Agent wykonuje również **cykliczny audyt** magazynu (co 3 minuty), dzięki któremu może wykryć braki produktów.
 
 ---
 

@@ -4,101 +4,45 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 
 from data.models import AgentQuery
-from data.sql_functions import db_path, init_db, db_get_all_products
+from data.sql_functions import db_path, init_db
 from agent.h1_agent import run_h1_agent
-from network.server import mcp
-from network.client import request_producer_proposal, accept_producer_proposal
+from network.server import mcp, trigger_auto_procurement
+import data.sql_functions as sql_funcs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("H1_MAIN")
 
-# !!! nie wywoływać tutaj run_h1_agent bo pojawia się błąd z `thought_signature`
-async def initial_audit():
-    """Wstępny audyt magazynu w czystym Pythonie po starcie systemu."""
-    await asyncio.sleep(5)
-    logger.info("[INITIAL AUDIT] Uruchamianie audytu magazynu H1...")
-    try:
-        products = db_get_all_products()
-        low_stock = [p for p in products if float(p["quantity"]) < float(p.get("min_threshold", 20.0))]
-        
-        if not low_stock:
-            logger.info("[INITIAL AUDIT] Brak produktów poniżej progu min_threshold.")
-            return
-
-        for prod in low_stock:
-            item_name = prod["name"]
-            item_unit = prod["unit"]
-            threshold = float(prod.get("min_threshold", 20.0))
-            current_qty = float(prod["quantity"])
-            needed_qty = threshold - current_qty
-            if needed_qty <= 0:
-                needed_qty = 20.0
-
-            logger.info(f"[INITIAL AUDIT] Wykryto brak {item_name} ({current_qty}{item_name} / min. {threshold}{item_unit}). Zamawianie {needed_qty}{item_unit} u Producenta P1...")
-            
-            prop = await request_producer_proposal(buyer_id="H1", item_name=item_name, quantity=needed_qty)
-            if prop.get("message_type") == "PROPOSAL":
-                item_data = prop.get("item", {})
-                price = float(item_data.get("price", 0.0))
-                total_cost = float(prop.get("total_cost", price * needed_qty))
+async def periodic_audit():
+    """Cykliczny audyt magazynu w tle uruchamiany co 3 minuty."""
+    await asyncio.sleep(10)
+    
+    while True:
+        logger.info("[BACKGROUND AUDIT] Rozpoczynam cykliczny przegląd stanu magazynu...")
+        try:
+            all_products = sql_funcs.db_get_all_products()
+            for p in all_products:
+                current = float(p["quantity"])
+                threshold = float(p.get("min_threshold", 20.0))
                 
-                res = await accept_producer_proposal(
-                    buyer_id="H1", 
-                    item_name=item_name, 
-                    quantity=needed_qty, 
-                    price=price, 
-                    total_cost=total_cost
-                )
-                logger.info(f"[INITIAL AUDIT] Wynik dla {item_name}: {res.get('status', 'ACCEPTED')}")
-            else:
-                reason = prop.get("reason", "Producent odrzucił zapytanie ofertowe.")
-                logger.warning(f"[INITIAL AUDIT] Odmowa dla {item_name}: {reason}")
-
-    except Exception as e:
-        logger.error(f"[INITIAL AUDIT BŁĄD] {e}")
+                if current < threshold:
+                    logger.info(f"[BACKGROUND AUDIT] Wykryto brak: '{p['name']}' (Stan: {current}, Próg: {threshold}). Uzupełniam...")
+                    await trigger_auto_procurement(p["name"])
+                    
+        except Exception as e:
+            logger.error(f"[BACKGROUND AUDIT ERROR] Błąd podczas cyklicznego audytu: {e}")
+            
+        # 3 minuty do kolejnego sprawdzenia
+        await asyncio.sleep(180)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(initial_audit())
+    audit_task = asyncio.create_task(periodic_audit())
     yield
+    audit_task.cancel()
 
 
 app = FastAPI(title="Warehouse 1 (H1) Agent API", lifespan=lifespan)
-
-
-def extract_clean_text(raw_data) -> str:
-    """
-    Wyciąga czysty tekst wiadomości, ignorując struktury list, 
-    słowników, signature oraz zbędne znaki Markdown.
-    """
-    text = ""
-    if isinstance(raw_data, list) and len(raw_data) > 0:
-        first_elem = raw_data[0]
-        if isinstance(first_elem, dict):
-            text = first_elem.get("text", str(first_elem))
-        else:
-            text = str(first_elem)
-    elif isinstance(raw_data, dict):
-        text = raw_data.get("text", str(raw_data))
-    else:
-        text = str(raw_data)
-
-    return text.replace("**", "").replace("`", "").strip()
-
-
-@app.post("/chat")
-async def chat_endpoint(req: AgentQuery):
-    try:
-        raw_response = await run_h1_agent(req.prompt, req.thread_id)
-        clean_response = extract_clean_text(raw_response)
-        return {"status": "success", "response": clean_response}
-    except Exception as e:
-        logger.error(f"[CHAT ERROR] Błąd agenta H1: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-app.mount("/mcp", mcp.sse_app())
 
 products_info = [
     {"name": "flour", "quantity": 100, "unit": "kg", "price": 3.50, "min_threshold": 50.0},
@@ -116,6 +60,7 @@ products_info = [
 
 # !! jako url do połączenia z serwerem użyć http://127.0.0.1:8004/mcp/sse
 # Użyć http://127.0.0.1:8004/docs żeby przetestować interfejs API agenta H1 (Hurtowni 1) w przeglądarce.
+app.mount("/mcp", mcp.sse_app())
 
 if __name__ == "__main__":
     import uvicorn
