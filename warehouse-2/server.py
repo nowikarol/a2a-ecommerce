@@ -8,6 +8,7 @@ import logging
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from connections import get_connection, get_product
+import asyncio
 logger = logging.getLogger("H2_SERVER")
 mcp = FastMCP("Warehouse H2")
 BUYER_URLS = {
@@ -196,7 +197,10 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
             price=product["price"]),
         total_cost=cost)
     delivery_dict = delivery.model_dump() if hasattr(delivery, 'model_dump') else delivery.dict()
-    await send_delivery_to_buyer(buyer_id=sender_id, delivery_payload={"delivery_data": delivery_dict})
+
+    # Run delivery notification in the background to prevent a deadlock 
+    # (waiting for buyer response while buyer is waiting for our HTTP response)
+    asyncio.create_task(send_delivery_to_buyer(buyer_id=sender_id, delivery_payload={"delivery_data": delivery_dict}))
     return Accept_Offer(
         sender_id="H2",
         receiver_id=accept_Offer.receiver_id,
