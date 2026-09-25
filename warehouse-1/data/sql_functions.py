@@ -18,7 +18,8 @@ def init_db(products: List[Dict[str, Any]]):
                 name TEXT UNIQUE NOT NULL,
                 quantity INTEGER NOT NULL,
                 unit TEXT NOT NULL DEFAULT 'pcs',
-                price REAL NOT NULL
+                price REAL NOT NULL,
+                min_threshold REAL NOT NULL DEFAULT 20.0
             )
         """)
         cursor.execute("""
@@ -42,20 +43,24 @@ def init_db(products: List[Dict[str, Any]]):
         
         for p in products:
             cursor.execute("""
-                INSERT OR IGNORE INTO products (name, quantity, unit, price)
-                VALUES (?, ?, ?, ?)
-            """, (p['name'].lower().strip(), p['quantity'], p.get('unit', 'pcs'), p['price']))
+                INSERT OR IGNORE INTO products (name, quantity, unit, price, min_threshold)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                p['name'].lower().strip(), 
+                p['quantity'], 
+                p.get('unit', 'pcs'), 
+                p['price'], 
+                p.get('min_threshold', 20.0)  # minimalny próg dla produktów na stanie, domyślnie 20
+            ))
         conn.commit()
 
 def db_get_product(item_name: str):
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Czyszczenie i dopasowanie bez względu na wielkość liter
     clean_name = item_name.strip().lower()
     
     cursor.execute(
-        "SELECT name, quantity, unit, price FROM products WHERE LOWER(TRIM(name)) = ?", 
+        "SELECT name, quantity, unit, price, min_threshold FROM products WHERE LOWER(TRIM(name)) = ?", 
         (clean_name,)
     )
     row = cursor.fetchone()
@@ -66,14 +71,15 @@ def db_get_product(item_name: str):
             "name": row[0],
             "quantity": float(row[1]),
             "unit": row[2],
-            "price": float(row[3])
+            "price": float(row[3]),
+            "min_threshold": float(row[4])
         }
     return None
 
 def db_get_all_products() -> List[Dict[str, Any]]:
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT name, quantity, unit, price FROM products")
+        cursor.execute("SELECT name, quantity, unit, price, min_threshold FROM products")
         return [dict(row) for row in cursor.fetchall()]
 
 def db_get_balance() -> float:

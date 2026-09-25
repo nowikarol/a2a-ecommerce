@@ -23,6 +23,7 @@ load_dotenv(BASE_DIR / ".env")
 
 from data.models import TradeMessage, Item
 from data.sql_functions import db_get_product, db_get_all_products, db_process_sale_transaction
+from network.client import request_producer_proposal, accept_producer_proposal
 
 AGENT_ID = "H1"
 
@@ -39,7 +40,7 @@ async def send_delivery_to_buyer(buyer_id: str, delivery_payload: dict):
     """Łączy się z odpowiednią restauracją i wywołuje narzędzie 'receive_delivery'."""
     buyer_url = BUYER_URLS.get(buyer_id)
     if not buyer_url:
-        logger.error(f"[{AGENT_ID}] BŁĄD: Brak skonfigurowanego URL dla kupującego: {buyer_id}")
+        logger.error(f"[DELIVERY ERROR] Brak skonfigurowanego URL dla kupującego: {buyer_id}")
         return
 
     try:
@@ -48,9 +49,47 @@ async def send_delivery_to_buyer(buyer_id: str, delivery_payload: dict):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 result = await session.call_tool("receive_delivery", arguments={"delivery_data": delivery_payload})
-                logger.info(f"[{AGENT_ID} -> {buyer_id}] Potwierdzenie dostawy: {result}")
+                logger.info(f"[DELIVERY -> {buyer_id}] Potwierdzenie dostawy: {result}")
     except Exception as error:
-        logger.error(f"[{AGENT_ID} -> {buyer_id} BŁĄD DOSTAWY]: {error}")
+        logger.error(f"[DELIVERY ERROR -> {buyer_id}] Nie udało się dostarczyć towaru: {error}")
+
+
+async def trigger_auto_procurement(item_name: str):
+    """Automatyczne uzupełnianie zapasów po sprzedaży w przypadku spadku poniżej progu min_threshold."""
+    try:
+        db_row = sql_funcs.db_get_product(item_name)
+        if not db_row:
+            return
+
+        current_qty = float(db_row["quantity"])
+        threshold = float(db_row.get("min_threshold", 20.0))
+        
+        if current_qty < threshold:
+            needed_qty = threshold - current_qty
+            if needed_qty <= 0:
+                needed_qty = 20.0
+
+            logger.info(f"[EVENT TRIGGER] Stan dla '{item_name}' wynosi {current_qty} kg (próg: {threshold} kg). Zamawianie {needed_qty} kg u P1...")
+            
+            prop = await request_producer_proposal(buyer_id="H1", item_name=item_name, quantity=needed_qty)
+            if prop.get("message_type") == "PROPOSAL":
+                item_data = prop.get("item", {})
+                price = float(item_data.get("price", 0.0))
+                total_cost = float(prop.get("total_cost", price * needed_qty))
+                
+                res = await accept_producer_proposal(
+                    buyer_id="H1", 
+                    item_name=item_name, 
+                    quantity=needed_qty, 
+                    price=price, 
+                    total_cost=total_cost
+                )
+                logger.info(f"[EVENT TRIGGER RESULT] {item_name}: {res.get('status', 'ACCEPTED')}")
+            else:
+                logger.warning(f"[EVENT TRIGGER REJECTED] Producent odrzucił zapytanie na {item_name}")
+            
+    except Exception as e:
+        logger.error(f"[EVENT TRIGGER ERROR] Błąd automatycznego zamawiania dla {item_name}: {e}")
 
 
 @mcp.tool()
@@ -108,6 +147,7 @@ def request_offer(receiver_id: str, item: Item, sender_id: str = "R2", message_t
 @mcp.tool()
 async def accept_offer(receiver_id: str, item: Item, total_cost: float, sender_id: str = "R2", message_type: str = "ACCEPT_PROPOSAL") -> str:
     """Obsługuje akceptację oferty przez Kupującego (Krok 4 & 5 CNP)."""
+    logger.info(f"[SALE ACCEPTED] Zaakceptowano zamówienie od {sender_id}: {item.name} ({item.quantity} kg, koszt: {total_cost} PLN)")
     db_row = db_get_product(item.name.strip())
     
     actual_unit = db_row["unit"] if db_row else item.unit
@@ -127,6 +167,7 @@ async def accept_offer(receiver_id: str, item: Item, total_cost: float, sender_i
     ).model_dump(mode="json")
     
     asyncio.create_task(send_delivery_to_buyer(buyer_id=sender_id, delivery_payload=delivery_payload))
+    asyncio.create_task(trigger_auto_procurement(item_name=item.name.strip()))
 
     return TradeMessage(
         sender_id=AGENT_ID, receiver_id=sender_id, message_type="ACCEPT_PROPOSAL",
@@ -156,7 +197,7 @@ async def receive_delivery(
             "reason": f"Brakujące pola towaru: item_name={item_name}, quantity={quantity}"
         })
 
-    logger.info(f"Otrzymano dostawę od {sender_id}: {quantity} kg {item_name} (koszt: {total_cost} PLN)")
+    logger.info(f"[DELIVERY RECEIVED] Otrzymano dostawę od {sender_id}: {quantity} kg {item_name} (koszt: {total_cost} PLN)")
 
     success = sql_funcs.db_process_procurement_transaction(
         partner=sender_id,
