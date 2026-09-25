@@ -1,4 +1,4 @@
-
+from client import check_producer_availability, request_producer_proposal, accept_producer_proposal
 from dotenv import load_dotenv
 import os
 from langchain_core.tools import tool
@@ -14,7 +14,6 @@ from scheam import (Item, Delivery, Accept_Offer, Reject,
                     Availability_Response)
 from fastmcp import FastMCP
 from connections import get_connection, get_product
-import httpx
 import logging
 
 
@@ -28,7 +27,7 @@ Na stanie masz 11 produktów. Masz je podane po angielsku i w nawiasie dodatkowo
 Pełnisz dwie role:
 1. Dla P1 jesteś kupcem/kupującym
 2. Dla R1 i R2 jesteś sprzedawcą/sprzedającym
-Jako kupiec masz na celu kupować od producenta P1, gdy jako H2 masz niewystarczająco produktów w magazynie po jego sprawdzeniu. Gdy masz wystarczającą ilość, nie kupuj produktu. Gdy jest go za mało ustal potrzebną ilość i poproś o ofertę producenta P1. Przed samym zakupem musisz sprawdzić aktualny balans portlefa i czy masz odpowiednio środków. Jeśli masz za mało pieniędzy odrzuć ofertę. Gdy ilość środków jest wystarczająca zaakceptuj oferte uzywając "accept_offer_from_producer". Jak zakup zostanie zaakcpetowany czekaj na wywołanie "receive delivery" i jak dostaniesz dostawę zaktualizuj swój magazyn i portfel. 
+Jako kupiec masz na celu kupować od producenta P1, gdy jako H2 masz niewystarczająco produktów w magazynie po jego sprawdzeniu, tzn. 30 lub mniej produktów wtedy wywołaj "restock". W innym przypadku gdy stwierdzisz, ze produktu jeest go za mało ustal potrzebną ilość i poproś o ofertę producenta P1. Przed samym zakupem musisz sprawdzić aktualny balans portlefa i czy masz odpowiednio środków. Jeśli masz za mało pieniędzy odrzuć ofertę. Gdy ilość środków jest wystarczająca zaakceptuj oferte uzywając "accept_offer_from_producer". Jak zakup zostanie zaakcpetowany czekaj na wywołanie "receive delivery" i jak dostaniesz dostawę zaktualizuj swój magazyn i portfel. 
 Jako sprzedawca jako H2 sprzedajesz te produkty do R1 i R2. Podczas sprzedaży produktu stosuj następujący protokół:
 1. "check_availability" do sprawdzenia czy jako H2 posiadasz odpowiednią ilość produktów.
 2. "request_offer" gdy masz w magazynie odpowiednią ilość produktów przygotuj ofertę dla kupującego
@@ -38,19 +37,15 @@ Zawsze korzystaj z dostępnych narzędzi, aby badać stan faktyczny hurtowni i p
 """
 
 @tool
-def stock_info(product:str) -> Item:
+def stock_info(item:str) -> Item:
     """
     Returns stock information about a specific product.
     """
-    product= get_product(product)
+    product= get_product(item)
 
     if product is None:
-        return Item(name=product["name"],
-                    quantity=0, price=0)
-
-    return Item(name=product["name"],
-        quantity=product["quantity"],
-        price=product["price"])
+        return Item(name=item,quantity=0, price=0)
+    return Item(name=product.name,quantity=product.quantity,price=product.price)
 
 @tool
 def products_status() -> list[Item]:
@@ -69,57 +64,38 @@ def products_status() -> list[Item]:
         cursor.close()
         connection.close()
 
-PRODUCER_URL = {"P1":os.getenv("PRODUCER_URL", "http://127.0.0.1:8001//sse")}
-
 @tool
-def get_proposal(item:str, quantity:int,price:float) -> Request_Offer:
+async def get_proposal(item:Item) -> Response_Offer:
     """
     Prepare request to producer to buy a specific product.
     """
-    item=Item(
-        name=item,
-        quantity=quantity,
-        price=price)
-    request_Offer=Request_Offer(
-        sender_id="H2",
-        reciver_id="P1",
-        message_type="CALL_FOR_PROPOSAL",
-        item=item
-    )
-    if item["name"] is None:
-        return stock_info(item.name)
-    
-    try:
-        with httpx.Client(timeout=5.0) as client:
-            response = client.post(PRODUCER_URL, json=request_Offer.model_dump())
-            data = response.json() 
-            return Response_Offer(
-                sender_id="P1",
-                receiver_id="H2",
-                message_type="PROPOSAL",
-                item=Item(
-                    name=data["item"]["name"],
-                    quantity=data["item"]["quantity"],
-                    price=data["item"]["price"]))
-    except Exception as exc:
-        return Reject(
-            sender_id="P1",
+    result = await request_producer_proposal(item_name=item.name,quantity=item.quantity)
+
+    if result.get("message_type") != "PROPOSAL":
+        return Reject(sender_id="P1",
             receiver_id="H2",
             message_type="REJECT_PROPOSAL",
-            item=item)
-    
+            item=item,
+            total_cost=0.0)
+
+    data = result["item"]
+
+    return Response_Offer(sender_id="P1",
+        receiver_id="H2",
+        message_type="PROPOSAL",
+        item=Item(
+            name=data["name"],
+            quantity=data["quantity"],
+            price=data["price"]
+        ),
+        total_cost=result["total_cost"]
+    )
+
 @tool
-def accept_offer_from_producer(item: Item ,total_cost: float,
-receiver_id: str = "H2", sender_id:str="P1",
-message_type: str = "PROPOSAL") -> Accept_Offer:
+async def accept_offer_from_producer(Proposal:Response_Offer) -> Accept_Offer:
     """
     Accepts an offer from the producer. Checks if the warehouse is able to purchase it.
     """
-    Proposal=Response_Offer(sender_id=sender_id,
-        receiver_id=receiver_id,
-        message_type=message_type,
-        item=item,
-        total_cost=total_cost)
     quantity=Proposal.item.quantity
     price=Proposal.item.price
     total_cost=quantity*price
@@ -129,38 +105,78 @@ message_type: str = "PROPOSAL") -> Accept_Offer:
         cursor.execute("SELECT ballance FROM wallet_warehouse2 ORDER BY id DESC LIMIT 1")
         row = cursor.fetchone()
         current_balance = row["ballance"]
-        
-        if current_balance < total_cost:
-            return Reject(
-                sender_id="H2",
-                receiver="P1",
-                message_type="REJECT_PROPOSAL",
-                item=Item(
-                    name=Proposal.item.name,
-                    quantity=quantity,
-                    price=price))   
     finally:
         cursor.close()
         connection.close()
 
-    accept_Offer=Accept_Offer(
-        sender_id="H2",
-        receiver="P1",
-        message_type="ACCEPT_PROPOSAL",
-        item=Item(
-            name=Proposal.item.name,
-            quantity=quantity,
-            price=price),
+    if current_balance < total_cost:
+        return Reject(sender_id="P1",
+            receiver="H2",
+            message_type="REJECT_PROPOSAL",
+            item=Item(
+                name=Proposal.item.name,
+                quantity=quantity,
+                price=price))  
+
+    proposal= await accept_producer_proposal(
+        item_name=Proposal.item.name,
+        quantity=quantity,
+        price=price,
         total_cost=total_cost)
+    return proposal
 
+@tool
+async def restock() -> str:
+    """
+    Checks products in warehouse2. If quantity is <=30 it automatically buys 50kg of product
+    """
+    connection = get_connection()
     try:
-        with httpx.Client(timeout=5.0) as client:
-            response = client.post(PRODUCER_URL, json=accept_Offer.model_dump())
-            return response.json()
-    except Exception as exc:
-        return f"{exc}"
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT name, quantity, price FROM warehouse2
+            WHERE quantity <= 30
+            """)
+        rows = cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
 
-tools = [stock_info, products_status, get_proposal, accept_offer_from_producer]
+    if not rows:
+        return "There is no need to restock anything"
+
+    products = []
+    for row in rows:
+        product_name = row["name"]
+        availability = await check_producer_availability(item_name=product_name,quantity=50)
+        if availability.get("message_type") != "AVAILABILITY_RESPONSE":
+            products.append(f"{product_name}: could not check availability at P1.")
+            continue
+
+        if not availability.get("is_available"):
+            products.append(
+                f"{product_name}: P1 does not have enough stock ")
+            continue
+        proposal = await get_proposal(Item(name=product_name,quantity=50))
+
+        if proposal.get( "message_type") != "PROPOSAL":
+            products.append(f"{product_name}: P1 rejects the offer.")
+            continue
+
+        accepted_offer = await accept_offer_from_producer(proposal)
+
+        if accepted_offer.get("message_type") == "ACCEPT_PROPOSAL":
+            products.append(
+                f"{product_name}: H2 bought 50 kg."
+            )
+        else:
+            products.append(
+                f"{product_name}: Offer got rejected.")
+    return "\n".join(products)
+
+
+tools = [stock_info, products_status, get_proposal, accept_offer_from_producer,restock]
 llm = ChatGoogleGenerativeAI(
     model="gemini-3.1-flash-lite",
     max_retries=5)

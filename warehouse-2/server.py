@@ -211,14 +211,21 @@ async def accept_offer(sender_id: str, item: Item, total_cost: float,
 # Warehouse as a buyer agent
 # Step 5 Agent updates products after new purchase
 @mcp.tool
-def receive_delivery(Delivery:Delivery):
+def receive_delivery(item:Item, sender_id: str = "P1", receiver_id: str = "H2",
+    total_cost: float = 0.0,message_type: str = "DELIVERY"):
     '''
     Updates the warehouse stock based on the received products from the producer.
     '''
-    product = get_product(Delivery.item.name)
-    bought_quantity=Delivery.item.quantity
-    price=Delivery.item.price
-    total_cost = bought_quantity * price
+    item_name = item.name
+    quantity = item.quantity
+    price = item.price
+    delivery=Delivery(
+        sender_id=sender_id,
+        receiver_id=receiver_id,
+        message_type="DELIVERY",
+        item=Item(name=item_name,quantity=quantity,price=price),
+        total_cost=total_cost
+    )
     try:
         connection=get_connection()
         cursor = connection.cursor()
@@ -226,8 +233,8 @@ def receive_delivery(Delivery:Delivery):
             """
             UPDATE warehouse2
             SET quantity = quantity + ?
-            WHERE name = ?
-            """,(bought_quantity, product["name"]))
+            WHERE LOWER(name) = LOWER(?)
+            """,(quantity, item_name))
         connection.commit()
         cursor.execute(
             """
@@ -238,17 +245,15 @@ def receive_delivery(Delivery:Delivery):
         wallet = cursor.fetchone()
         balance = wallet["ballance"]
         new_balance = balance - total_cost
-
         cursor.execute(
             """
             INSERT INTO wallet_warehouse2 (sender_id,receiver_id,type,ballance)
             SELECT "H2", ?, "EXPENSE", ?
-            """, (Delivery.sender_id,new_balance))
+            """, (delivery.sender_id,new_balance))
         connection.commit()
     finally:
         cursor.close()
         connection.close()
-
 
 def run_mcp_server():
     '''
