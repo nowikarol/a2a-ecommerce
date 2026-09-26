@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A2A Supply Chain Network Visualizer</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo-badge">
+          <span class="logo-icon">🌐</span>
+          <div class="logo-texts">
+            <h1>A2A Supply Chain Visualizer</h1>
+            <p>Wizualizacja komunikacji agentów w czasie rzeczywistym • MCP & CNP Protocol</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-center">
+        <div class="toolbar">
+          <button class="btn btn-primary" id="btn-demo" title="CNP Ścieżka A (Sukces): 5 kroków Kupujący ➔ Sprzedający zgodnie ze specyfikacją">
+            <span class="btn-icon">⚡</span> CNP: Sukces (R1 ➔ H1)
+          </button>
+          <button class="btn btn-secondary" id="btn-demo-reject" title="CNP Ścieżka B: Sprzedawca odrzuca (REJECT ❌), Kupujący wykonuje Fallback">
+            <span class="btn-icon">❌</span> CNP: Odrzucenie i Fallback
+          </button>
+          <button class="btn btn-secondary" id="btn-h1-buy" title="5-etapowy proces CNP dla relacji Hurtownia H1 (Kupujący) ➔ Producent P1 (Sprzedający)">
+            <span class="btn-icon">🌾</span> H1 ➔ P1 (CNP Hurtownia ➔ Producent)
+          </button>
+          <button class="btn btn-secondary" id="btn-toggle-chat" title="Przełącz do czatu z agentami w panelu bocznym">
+            <span class="btn-icon">💬</span> Czat z Agentami
+          </button>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <button class="icon-btn" id="btn-sound" title="Dźwięki zdarzeń">
+          <span id="sound-icon">🔊</span>
+        </button>
+        <div class="connection-status" id="connection-status">
+          <span class="status-dot"></span>
+          <span class="status-label">Łączenie...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-content">
+      <!-- Graph Canvas Container -->
+      <section class="graph-section">
+        <div class="graph-controls">
+          <div class="legend">
+            <span class="legend-item"><span class="badge badge-avail">🔍 Dostępność</span></span>
+            <span class="legend-item"><span class="badge badge-rfq">📑 Zapytanie (CFP)</span></span>
+            <span class="legend-item"><span class="badge badge-prop">🏷️ Oferta</span></span>
+            <span class="legend-item"><span class="badge badge-accept">🤝 Akceptacja</span></span>
+            <span class="legend-item"><span class="badge badge-reject">❌ Odrzucenie</span></span>
+            <span class="legend-item"><span class="badge badge-delivery">🚚 Dostawa</span></span>
+          </div>
+          <div class="speed-control">
+            <span class="speed-label">Prędkość pakietów:</span>
+            <input type="range" id="speed-slider" min="800" max="3000" step="200" value="1800">
+            <span id="speed-val">1.8s</span>
+          </div>
+        </div>
+
+        <div class="graph-wrapper" id="graph-wrapper">
+          <svg id="network-svg" viewBox="0 0 1000 680" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <!-- Edge Gradient Definitions -->
+              <linearGradient id="grad-p1-h1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.6"/>
+              </linearGradient>
+              <linearGradient id="grad-p1-h2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.6"/>
+              </linearGradient>
+              <linearGradient id="grad-h1-r1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="#10b981" stop-opacity="0.6"/>
+              </linearGradient>
+              <linearGradient id="grad-h1-r2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="#ec4899" stop-opacity="0.6"/>
+              </linearGradient>
+              <linearGradient id="grad-h2-r1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="#10b981" stop-opacity="0.6"/>
+              </linearGradient>
+              <linearGradient id="grad-h2-r2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.6"/>
+                <stop offset="100%" stop-color="#ec4899" stop-opacity="0.6"/>
+              </linearGradient>
+
+              <!-- Node Glow Filters -->
+              <filter id="glow-gold" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="8" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              <filter id="glow-blue" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="8" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              <filter id="glow-purple" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="8" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              <filter id="glow-green" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="8" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              <filter id="glow-pink" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="8" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            <!-- Background Network Edges -->
+            <g id="edges-group">
+              <path id="edge-P1-H1" class="edge-path" stroke="url(#grad-p1-h1)" d="M 500 100 Q 340 180 240 310" />
+              <path id="edge-P1-H2" class="edge-path" stroke="url(#grad-p1-h2)" d="M 500 100 Q 660 180 760 310" />
+              <path id="edge-H1-R1" class="edge-path" stroke="url(#grad-h1-r1)" d="M 240 310 Q 250 440 300 550" />
+              <path id="edge-H1-R2" class="edge-path" stroke="url(#grad-h1-r2)" d="M 240 310 Q 450 460 700 550" />
+              <path id="edge-H2-R1" class="edge-path" stroke="url(#grad-h2-r1)" d="M 760 310 Q 550 460 300 550" />
+              <path id="edge-H2-R2" class="edge-path" stroke="url(#grad-h2-r2)" d="M 760 310 Q 750 440 700 550" />
+            </g>
+
+            <!-- Layer for Flying Packets & Pictograms -->
+            <g id="packets-group"></g>
+
+            <!-- Graph Nodes -->
+            <g id="nodes-group">
+              <!-- Node P1 (Top) -->
+              <g class="graph-node" id="node-P1" transform="translate(500, 100)" data-node="P1">
+                <circle class="node-halo" r="54" filter="url(#glow-gold)" stroke="#f59e0b"></circle>
+                <circle class="node-body" r="42" fill="#1e1b18" stroke="#f59e0b" stroke-width="3"></circle>
+                <text class="node-icon" y="-4" text-anchor="middle">🏭</text>
+                <text class="node-title" y="16" text-anchor="middle">P1</text>
+                <text class="node-sub" y="60" text-anchor="middle">Producent (:8001)</text>
+              </g>
+
+              <!-- Node H1 (Mid Left) -->
+              <g class="graph-node" id="node-H1" transform="translate(240, 310)" data-node="H1">
+                <circle class="node-halo" r="54" filter="url(#glow-blue)" stroke="#3b82f6"></circle>
+                <circle class="node-body" r="42" fill="#141c2b" stroke="#3b82f6" stroke-width="3"></circle>
+                <text class="node-icon" y="-4" text-anchor="middle">🏢</text>
+                <text class="node-title" y="16" text-anchor="middle">H1</text>
+                <text class="node-sub" y="60" text-anchor="middle">Hurtownia 1 (:8004)</text>
+                <text class="node-balance" id="badge-bal-H1" y="-50" text-anchor="middle">13 835 PLN</text>
+              </g>
+
+              <!-- Node H2 (Mid Right) -->
+              <g class="graph-node" id="node-H2" transform="translate(760, 310)" data-node="H2">
+                <circle class="node-halo" r="54" filter="url(#glow-purple)" stroke="#8b5cf6"></circle>
+                <circle class="node-body" r="42" fill="#1f182b" stroke="#8b5cf6" stroke-width="3"></circle>
+                <text class="node-icon" y="-4" text-anchor="middle">🏬</text>
+                <text class="node-title" y="16" text-anchor="middle">H2</text>
+                <text class="node-sub" y="60" text-anchor="middle">Hurtownia 2 (:8005)</text>
+                <text class="node-balance" id="badge-bal-H2" y="-50" text-anchor="middle">1 049 PLN</text>
+              </g>
+
+              <!-- Node R1 (Bottom Left) -->
+              <g class="graph-node" id="node-R1" transform="translate(300, 550)" data-node="R1">
+                <circle class="node-halo" r="54" filter="url(#glow-green)" stroke="#10b981"></circle>
+                <circle class="node-body" r="42" fill="#14261f" stroke="#10b981" stroke-width="3"></circle>
+                <text class="node-icon" y="-4" text-anchor="middle">🍕</text>
+                <text class="node-title" y="16" text-anchor="middle">R1</text>
+                <text class="node-sub" y="60" text-anchor="middle">Restauracja 1 (:8002)</text>
+                <text class="node-balance" id="badge-bal-R1" y="-50" text-anchor="middle">1 038 PLN</text>
+              </g>
+
+              <!-- Node R2 (Bottom Right) -->
+              <g class="graph-node" id="node-R2" transform="translate(700, 550)" data-node="R2">
+                <circle class="node-halo" r="54" filter="url(#glow-pink)" stroke="#ec4899"></circle>
+                <circle class="node-body" r="42" fill="#2b1424" stroke="#ec4899" stroke-width="3"></circle>
+                <text class="node-icon" y="-4" text-anchor="middle">🍝</text>
+                <text class="node-title" y="16" text-anchor="middle">R2</text>
+                <text class="node-sub" y="60" text-anchor="middle">Restauracja 2 (:8003)</text>
+                <text class="node-balance" id="badge-bal-R2" y="-50" text-anchor="middle">14 887 PLN</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+
+        <!-- Bottom Node Quick Bar -->
+        <div class="nodes-status-bar">
+          <div class="node-card" id="card-P1" onclick="showNodeDetails('P1')">
+            <div class="nc-top">
+              <span class="nc-icon">🏭</span>
+              <span class="nc-name">Producent P1</span>
+              <span class="nc-badge online">ONLINE</span>
+            </div>
+            <div class="nc-details">
+              <span>Port: <b>8001</b></span>
+              <span id="stat-p1-stock">Katalog: 11 surowców</span>
+            </div>
+          </div>
+
+          <div class="node-card" id="card-H1" onclick="showNodeDetails('H1')">
+            <div class="nc-top">
+              <span class="nc-icon">🏢</span>
+              <span class="nc-name">Hurtownia H1</span>
+              <span class="nc-badge online">ONLINE</span>
+            </div>
+            <div class="nc-details">
+              <span>Saldo: <b id="stat-h1-bal">13 835 PLN</b></span>
+              <span id="stat-h1-stock">Magazyn: 11 poz.</span>
+            </div>
+          </div>
+
+          <div class="node-card" id="card-H2" onclick="showNodeDetails('H2')">
+            <div class="nc-top">
+              <span class="nc-icon">🏬</span>
+              <span class="nc-name">Hurtownia H2</span>
+              <span class="nc-badge online">ONLINE</span>
+            </div>
+            <div class="nc-details">
+              <span>Saldo: <b id="stat-h2-bal">1 049 PLN</b></span>
+              <span id="stat-h2-stock">Magazyn: 11 poz.</span>
+            </div>
+          </div>
+
+          <div class="node-card" id="card-R1" onclick="showNodeDetails('R1')">
+            <div class="nc-top">
+              <span class="nc-icon">🍕</span>
+              <span class="nc-name">Restauracja R1</span>
+              <span class="nc-badge online">ONLINE</span>
+            </div>
+            <div class="nc-details">
+              <span>Saldo: <b id="stat-r1-bal">1 038 PLN</b></span>
+              <span id="stat-r1-stock">Spiżarnia: 11 poz.</span>
+            </div>
+          </div>
+
+          <div class="node-card" id="card-R2" onclick="showNodeDetails('R2')">
+            <div class="nc-top">
+              <span class="nc-icon">🍝</span>
+              <span class="nc-name">Restauracja R2</span>
+              <span class="nc-badge online">ONLINE</span>
+            </div>
+            <div class="nc-details">
+              <span>Saldo: <b id="stat-r2-bal">14 887 PLN</b></span>
+              <span id="stat-r2-stock">Magazyn: 11 poz.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Sidebar: Interactive Chat & Live Events Stream -->
+      <aside class="sidebar mode-chat" id="app-sidebar">
+        <!-- Sidebar Navigation Tabs -->
+        <div class="sidebar-tabs">
+          <button class="sb-tab active" id="tab-btn-chat" onclick="switchSidebarTab('chat')">
+            <span class="tab-icon">💬</span> Czat z Agentami
+          </button>
+          <button class="sb-tab" id="tab-btn-feed" onclick="switchSidebarTab('feed')">
+            <span class="tab-icon">📡</span> Strumień JSON
+            <span class="tab-badge" id="feed-count-badge" style="display:none;">0</span>
+          </button>
+          <button class="sb-tab" id="tab-btn-split" onclick="switchSidebarTab('split')" title="Widok podzielony">
+            <span class="tab-icon">◫</span> Podzielony
+          </button>
+        </div>
+
+        <!-- Chat View Container -->
+        <div class="sidebar-view" id="view-chat">
+          <div class="chat-topbar">
+            <div class="chat-target-select-wrapper">
+              <label for="side-chat-target" class="chat-target-label">Agent:</label>
+              <select id="side-chat-target" class="chat-agent-dropdown" onchange="onChatTargetChange(this.value)">
+                <option value="R2" selected>🍝 Restauracja 2 (R2) — wymaga akceptacji człowieka</option>
+                <option value="R1">🍕 Restauracja 1 (R1) — autonomiczna</option>
+                <option value="H1">🏢 Hurtownia 1 (H1)</option>
+                <option value="H2">🏬 Hurtownia 2 (H2)</option>
+              </select>
+            </div>
+            <button class="icon-btn-sm" id="btn-clear-chat" title="Wyczyść historię czatu z tym agentem" onclick="clearCurrentChat()">
+              <span>🗑️</span>
+            </button>
+          </div>
+
+          <!-- Messages Thread -->
+          <div class="chat-thread" id="chat-thread">
+            <!-- Bubbles injected dynamically by app.js -->
+          </div>
+
+          <!-- Typing Indicator -->
+          <div class="chat-typing-row" id="chat-typing-indicator" style="display: none;">
+            <div class="chat-typing-bubble">
+              <span id="typing-agent-name">Agent</span> przetwarza polecenie
+              <span class="typing-dots">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Quick Action Chips (Confirmation / Common Tasks) -->
+          <div class="chat-quick-chips" id="chat-quick-chips">
+            <button class="quick-chip chip-confirm" onclick="quickSendChat('Tak, potwierdzam zakup')">
+              ✅ Tak, potwierdzam zakup
+            </button>
+            <button class="quick-chip chip-cancel" onclick="quickSendChat('Nie, anuluj')">
+              ❌ Nie, anuluj
+            </button>
+            <button class="quick-chip chip-action" onclick="quickFillChat('Przygotuj 5x Pizza Margherita')">
+              🍕 Przygotuj 5x Pizza
+            </button>
+            <button class="quick-chip chip-action" onclick="quickFillChat('Sprawdź stan mąki w magazynie')">
+              📦 Stan mąki
+            </button>
+            <button class="quick-chip chip-action" onclick="quickFillChat('Kup 10 kg mąki w hurtowniach')">
+              🌾 Kup 10kg mąki
+            </button>
+          </div>
+
+          <!-- Input Footer -->
+          <div class="chat-input-bar">
+            <textarea
+              id="side-chat-input"
+              class="chat-textarea"
+              placeholder="Wpisz polecenie lub odpowiedź (np. 'Tak, potwierdzam')... [Enter = Wyślij]"
+              rows="2"
+            ></textarea>
+            <button class="btn btn-primary chat-send-btn" id="btn-side-send-chat" onclick="submitSideChat()">
+              <span class="btn-icon">➤</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Live JSON Events Feed Container -->
+        <div class="sidebar-view" id="view-feed" style="display: none;">
+          <div class="sidebar-header">
+            <div class="sb-title">
+              <span class="pulse-indicator"></span>
+              <h2>Strumień Wiadomości JSON</h2>
+            </div>
+            <button class="clear-btn" id="btn-clear-feed" title="Wyczyść listę">Wyczyść</button>
+          </div>
+
+          <div class="events-feed" id="events-feed">
+            <div class="empty-state" id="feed-empty">
+              <p>Oczekiwanie na pierwsze pakiety JSON...</p>
+              <small>Użyj przycisków CNP u góry lub czatuj z agentami, aby zobaczyć przelatujące piktogramy.</small>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Node Details Drawer / Modal -->
+    <div class="modal-backdrop" id="node-modal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="node-modal-title">Szczegóły Węzła</h3>
+          <button class="modal-close" onclick="closeNodeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="node-modal-content">
+          Ładowanie danych...
+        </div>
+      </div>
+    </div>
+
+    <!-- JSON Inspector Modal -->
+    <div class="modal-backdrop" id="json-modal">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <div>
+            <h3 id="json-modal-title">Dokument JSON</h3>
+            <span class="json-meta" id="json-modal-meta"></span>
+          </div>
+          <button class="modal-close" onclick="closeJsonModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre class="json-viewer"><code id="json-code"></code></pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="copyJsonToClipboard()">Kopiuj JSON</button>
+          <button class="btn btn-primary" onclick="closeJsonModal()">Zamknij</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
