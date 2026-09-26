@@ -23,6 +23,7 @@ load_dotenv(BASE_DIR / ".env")
 
 from data.models import TradeMessage, Item
 from data.sql_functions import db_get_product, db_get_all_products, db_process_sale_transaction
+from network.client import check_producer_availability, request_producer_proposal, accept_producer_proposal
 
 AGENT_ID = "H1"
 
@@ -39,7 +40,7 @@ async def send_delivery_to_buyer(buyer_id: str, delivery_payload: dict):
     """Łączy się z odpowiednią restauracją i wywołuje narzędzie 'receive_delivery'."""
     buyer_url = BUYER_URLS.get(buyer_id)
     if not buyer_url:
-        logger.error(f"[{AGENT_ID}] BŁĄD: Brak skonfigurowanego URL dla kupującego: {buyer_id}")
+        logger.error(f"[DELIVERY ERROR] Brak skonfigurowanego URL dla kupującego: {buyer_id}")
         return
 
     try:
@@ -48,10 +49,59 @@ async def send_delivery_to_buyer(buyer_id: str, delivery_payload: dict):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 result = await session.call_tool("receive_delivery", arguments={"delivery_data": delivery_payload})
-                logger.info(f"[{AGENT_ID} -> {buyer_id}] Potwierdzenie dostawy: {result}")
+                logger.info(f"[DELIVERY -> {buyer_id}] Potwierdzenie dostawy: {result}")
     except Exception as error:
-        logger.error(f"[{AGENT_ID} -> {buyer_id} BŁĄD DOSTAWY]: {error}")
+        logger.error(f"[DELIVERY ERROR -> {buyer_id}] Nie udało się dostarczyć towaru: {error}")
 
+async def trigger_auto_procurement(item_name: str):
+    """Automatyczne uzupełnianie zapasów (jeśli nie ma docelowej ilości - bierze tyle, ile producent ma aktualnie na stanie)."""
+    try:
+        db_row = sql_funcs.db_get_product(item_name)
+        if not db_row:
+            return
+
+        current_qty = float(db_row["quantity"])
+        threshold = float(db_row.get("min_threshold", 20.0))
+        unit = db_row.get("unit", "kg")
+        
+        if current_qty < threshold:
+            target_stock = threshold * 2.0
+            desired_qty = int(round(target_stock - current_qty))
+            if desired_qty <= 0:
+                desired_qty = int(round(threshold))
+
+            # Sprawdzamy realną dostępność u Producenta przed złożeniem zamówienia
+            avail_res = await check_producer_availability(buyer_id="H1", item_name=item_name, quantity=float(desired_qty))
+            available_qty = float(avail_res.get("available_quantity", 0.0))
+            
+            if available_qty <= 0:
+                logger.info(f"[BACKGROUND AUDIT] Producent nie ma obecnie na stanie '{item_name}'. Czekamy na odnowienie zapasów u P1.")
+                return
+
+            # Bierzemy to, co potrzebujemy, ale nie więcej niż producent ma w tej chwili (Best-Effort)
+            actual_qty = int(min(desired_qty, available_qty))
+            
+            logger.info(f"[BACKGROUND AUDIT] P1 ma {available_qty} {unit} (chcieliśmy {desired_qty}). Zamawiamy dostępną partię: {actual_qty} {unit}.")
+
+            prop = await request_producer_proposal(buyer_id="H1", item_name=item_name, quantity=float(actual_qty))
+            if prop.get("message_type") == "PROPOSAL":
+                item_data = prop.get("item", {})
+                price = float(item_data.get("price", 0.0))
+                total_cost = float(prop.get("total_cost", price * actual_qty))
+                
+                res = await accept_producer_proposal(
+                    buyer_id="H1", 
+                    item_name=item_name, 
+                    quantity=float(actual_qty), 
+                    price=price, 
+                    total_cost=total_cost
+                )
+                logger.info(f"[BACKGROUND AUDIT RESULT] {item_name}: {res.get('status', 'ACCEPTED')}")
+            else:
+                logger.warning(f"[BACKGROUND AUDIT REJECTED] Producent odrzucił zapytanie na {item_name}")
+            
+    except Exception as e:
+        logger.error(f"[BACKGROUND AUDIT ERROR] Błąd automatycznego zamawiania dla {item_name}: {e}")
 
 @mcp.tool()
 def get_inventory() -> str:
@@ -108,6 +158,7 @@ def request_offer(receiver_id: str, item: Item, sender_id: str = "R2", message_t
 @mcp.tool()
 async def accept_offer(receiver_id: str, item: Item, total_cost: float, sender_id: str = "R2", message_type: str = "ACCEPT_PROPOSAL") -> str:
     """Obsługuje akceptację oferty przez Kupującego (Krok 4 & 5 CNP)."""
+    logger.info(f"[SALE ACCEPTED] Zaakceptowano zamówienie od {sender_id}: {item.name} ({item.quantity} kg, koszt: {total_cost} PLN)")
     db_row = db_get_product(item.name.strip())
     
     actual_unit = db_row["unit"] if db_row else item.unit
@@ -156,7 +207,7 @@ async def receive_delivery(
             "reason": f"Brakujące pola towaru: item_name={item_name}, quantity={quantity}"
         })
 
-    logger.info(f"Otrzymano dostawę od {sender_id}: {quantity} kg {item_name} (koszt: {total_cost} PLN)")
+    logger.info(f"[DELIVERY RECEIVED] Otrzymano dostawę od {sender_id}: {quantity} kg {item_name} (koszt: {total_cost} PLN)")
 
     success = sql_funcs.db_process_procurement_transaction(
         partner=sender_id,

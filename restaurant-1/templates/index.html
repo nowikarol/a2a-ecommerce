@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel Sterowania - Restauracja R1</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen p-6">
+    <div class="max-w-6xl mx-auto">
+        
+        <!-- Nagłówek -->
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 border-b border-slate-800 pb-4 gap-4">
+            <div>
+                <h1 class="text-3xl font-extrabold text-amber-500">Panel Restauracji R1</h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-xs bg-slate-900 px-3 py-1.5 rounded-full text-emerald-400 border border-emerald-500/30">Aktywny węzeł: R1 (Port 8002)</span>
+            </div>
+        </header>
+
+        <!-- Główny układ -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Lewa kolumna: Konto i Szybkie Akcje -->
+            <div class="space-y-6">
+                <!-- Portfel -->
+                <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg">
+                    <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Stan konta</h2>
+                    <div id="wallet-balance" class="text-3xl font-black text-emerald-400">Ładowanie...</div>
+                </div>
+
+                <!-- Szybkie Akcje -->
+                <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg space-y-3">
+                    <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Szybkie Akcje Agenta</h2>
+                    <button onclick="sendQuickCommand('Przeprowadź audyt magazynu i domów brakujące składniki')" class="w-full text-left bg-slate-800 hover:bg-slate-700 px-4 py-3 rounded-xl text-sm transition font-medium text-emerald-300 border border-emerald-500/20 flex items-center justify-between">
+                        <span>Audyt i zamów braki</span>
+                    </button>
+                    <button onclick="sendQuickCommand('Sprawdź historię ostatnich transakcji finansowych')" class="w-full text-left bg-slate-800 hover:bg-slate-700 px-4 py-3 rounded-xl text-sm transition font-medium text-cyan-300 border border-cyan-500/20 flex items-center justify-between">
+                        <span>Historia transakcji</span>
+                    </button>
+                </div>
+
+                <!-- Terminal / Odpowiedź Agenta -->
+                <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg">
+                    <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Terminal Agenta</h2>
+                    <div class="flex gap-2 mb-3">
+                        <input type="text" id="user-prompt" placeholder="Wpisz polecenie..." 
+                               class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                               onkeypress="if(event.key === 'Enter') sendCommand()">
+                        <button onclick="sendCommand()" class="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition">
+                            Wyślij
+                        </button>
+                    </div>
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 h-36 overflow-y-auto">
+                        <div id="agent-response" class="text-xs text-slate-300 font-mono whitespace-pre-wrap">Gotowy do pracy...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prawa kolumna: Magazyn i pełne Menu z bazy -->
+            <div class="lg:col-span-2 space-y-6">
+                
+                <!-- Stan Spiżarni -->
+                <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg">
+                    <h2 class="text-base font-bold mb-4 text-slate-200 flex items-center justify-between">
+                        <span>Magazyn</span>
+                        <button onclick="loadDashboardData()" class="text-xs text-slate-400 hover:text-white bg-slate-800 px-2.5 py-1 rounded-lg">Odśwież</button>
+                    </h2>
+                    <div id="inventory-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <p class="text-slate-500 text-sm">Pobieranie danych...</p>
+                    </div>
+                </div>
+
+                <!-- Menu Restauracji (Wszystkie 7 dań z bazy SQLite) -->
+                <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg">
+                    <h2 class="text-base font-bold mb-2 text-slate-200">Menu (Kliknij, aby przygotować)</h2>
+                    <p class="text-xs text-slate-400 mb-4">Kliknij danie, aby zrealizować zamówienie. Kuchnia automatycznie zarządza stanem magazynu i zamawia braki u dostawców w razie potrzeby.</p>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        
+                        <!-- 1. Margherita -->
+                        <div onclick="cookDish('margherita_classica')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-amber-400 group-hover:text-amber-300">Pizza Margherita Classica</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Klasyczna pizza neapolitańska z passatą pomidorową i mozzarellą</p>
+                        </div>
+
+                        <!-- 2. Diavola -->
+                        <div onclick="cookDish('pizza_diavola')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-amber-400 group-hover:text-amber-300">Pizza Diavola</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Pikantna pizza z passatą, mozzarellą i plasterkami włoskiego salami</p>
+                        </div>
+
+                        <!-- 3. Prosciutto Cotto -->
+                        <div onclick="cookDish('pizza_prosciutto_cotto')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-amber-400 group-hover:text-amber-300">Pizza Prosciutto Cotto</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Wyśmienita pizza z sosem z passaty, mozzarellą i włoską szynką cotto</p>
+                        </div>
+
+                        <!-- 4. Bufala -->
+                        <div onclick="cookDish('pizza_bufala')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-amber-400 group-hover:text-amber-300">Pizza Bufala DOC</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Pizza premium ze świeżą mozzarellą di bufala i parmigiano reggiano</p>
+                        </div>
+
+                        <!-- 5. Parma e Rucola -->
+                        <div onclick="cookDish('pizza_parma_arugula')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-amber-400 group-hover:text-amber-300">Pizza Parma e Rucola</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Pizza z passatą, mozzarellą, prosciutto crudo, rukolą i parmigiano</p>
+                        </div>
+
+                        <!-- 6. Insalata Burrata -->
+                        <div onclick="cookDish('insalata_burrata')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-emerald-400 group-hover:text-emerald-300">Insalata Burrata e Crudo</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Wykwintna sałatka ze świeżą burratą, roszponką, rukolą i szynką crudo</p>
+                        </div>
+
+                        <!-- 7. Tagliere -->
+                        <div onclick="cookDish('tagliere_italiano')" class="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 hover:border-amber-500/50 cursor-pointer transition group sm:col-span-2">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-sm text-emerald-400 group-hover:text-emerald-300">Deska Wędlin i Serów Tagliere</span>
+                            </div>
+                            <p class="text-xs text-slate-400 mt-1">Tradycyjny włoski półmisek: prosciutto crudo, cotto, salami, burrata i parmigiano</p>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadDashboardData() {
+            try {
+                const statusRes = await fetch('/status');
+                const statusData = await statusRes.json();
+                document.getElementById('wallet-balance').innerText = `${statusData.wallet.balance.toFixed(2)} ${statusData.wallet.currency}`;
+
+                const invRes = await fetch('/inventory');
+                const invData = await invRes.json();
+                
+                const grid = document.getElementById('inventory-grid');
+                grid.innerHTML = '';
+                
+                const inventoryItems = invData.inventory || {};
+                for (const [name, info] of Object.entries(inventoryItems)) {
+                    let badgeColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                    if (info.status === "LOW_STOCK") badgeColor = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                    if (info.status === "CRITICAL_EMPTY") badgeColor = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+
+                    grid.innerHTML += `
+                        <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+                            <span class="text-xs text-slate-400 capitalize truncate">${name}</span>
+                            <div class="flex justify-between items-baseline mt-2">
+                                <span class="text-base font-bold">${info.quantity} <span class="text-[10px] font-normal text-slate-500">${info.unit}</span></span>
+                                <span class="text-[9px] px-1.5 py-0.5 rounded border ${badgeColor}">${info.quantity <= info.safety_threshold ? 'NISKI' : 'OK'}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (e) {
+                console.error("Błąd ładowania danych:", e);
+            }
+        }
+
+        async function sendCommand() {
+            const input = document.getElementById('user-prompt');
+            const prompt = input.value.trim();
+            if (!prompt) return;
+
+            document.getElementById('agent-response').innerText = "Przetwarzanie polecenia przez agenta...";
+            input.value = '';
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+                const data = await res.json();
+                document.getElementById('agent-response').innerText = data.response || data.odpowiedz || "Brak odpowiedzi.";
+                loadDashboardData();
+            } catch (e) {
+                document.getElementById('agent-response').innerText = "Błąd komunikacji: " + e;
+            }
+        }
+
+        async function cookDish(dishName) {
+            document.getElementById('agent-response').innerText = `Zamawianie w kuchni: ${dishName}...`;
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: `Przygotuj 1x ${dishName}` })
+                });
+                const data = await res.json();
+                document.getElementById('agent-response').innerText = data.response || data.odpowiedz || "Przygotowano danie.";
+                loadDashboardData();
+            } catch (e) {
+                document.getElementById('agent-response').innerText = "Błąd przygotowania dania: " + e;
+            }
+        }
+
+        function sendQuickCommand(text) {
+            document.getElementById('user-prompt').value = text;
+            sendCommand();
+        }
+
+        setInterval(loadDashboardData, 5000);
+        loadDashboardData();
+    </script>
+</body>
+</html>

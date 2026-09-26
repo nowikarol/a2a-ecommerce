@@ -4,6 +4,7 @@ import uuid
 import asyncio
 import logging
 import aiosqlite
+import math
 from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
@@ -12,18 +13,37 @@ from data.database import init_db, db_file
 from agent.agent import setup_agent
 from contextlib import asynccontextmanager
 
+# Konfiguracja zapisująca logi JEDNOCZEŚNIE do konsoli (dla Orkiestratora) i do pliku (dla GUI)
+log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+
+# Handler do pliku (mode='a' oznacza dopisywanie na końcu pliku)
+file_handler = logging.FileHandler('r2_system.log', mode='a', encoding='utf-8')
+file_handler.setFormatter(log_formatter)
+
+# Handler do konsoli
+stream_handler = logging.StreamHandler(sys.stderr)
+stream_handler.setFormatter(log_formatter)
+
+# Główna konfiguracja
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    handlers=[logging.StreamHandler(sys.stderr)]
-)
+    level=logging.INFO, 
+    handlers=[file_handler, stream_handler],
+    force=True
+    )
 logger = logging.getLogger("R2_MAIN")
+
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find("GET /powiadomienia") == -1
+
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 # Słownik przechowujący unikalny identyfikator wątku dla biblioteki LangGraph.
 # Pozwala to agentowi pamiętać kontekst rozmowy. Zmiana tego ID powoduje rozpoczęcie pracy z czystą kartą.
 stan_sesji = {"watek_id": str(uuid.uuid4())}
 agent_lock = asyncio.Lock()
 my_agent = None
+kolejka_powiadomien = []  # Skrzynka odbiorcza dla GUI
 
 class ChatRequest(BaseModel):
     polecenie: str
@@ -53,7 +73,7 @@ async def monitor_magazynu_w_tle(agent):
 
             async with aiosqlite.connect(db_file, timeout=10.0) as conn:
                 async with conn.execute(
-                    "SELECT nazwa_produktu, ilosc, prog_bezpieczenstwa FROM magazyn WHERE ilosc <= prog_bezpieczenstwa"
+                    "SELECT nazwa_produktu, ilosc, prog_bezpieczenstwa FROM magazyn WHERE ilosc < prog_bezpieczenstwa"
                 ) as cursor:
                     braki_z_bazy = await cursor.fetchall()
         
@@ -64,7 +84,11 @@ async def monitor_magazynu_w_tle(agent):
 
                 if nowe_braki:
                     # Tworzymy listę szczegółów braków w formacie "nazwa (ilość kg, próg bezpieczeństwa)"
-                    szczegoly_brakow = [f"{nazwa} ({ilosc} kg, próg {prog})" for nazwa, ilosc, prog in braki_z_bazy if nazwa in nowe_braki]
+                    szczegoly_brakow = []
+                    for nazwa, ilosc, prog in braki_z_bazy:
+                        if nazwa in nowe_braki:
+                            do_kupienia = int(math.ceil((prog - ilosc)))
+                            szczegoly_brakow.append(f"'{nazwa}' -> ZAMÓW DOKŁADNIE: {do_kupienia:.2f} kg")
                     lista_str = ", ".join(szczegoly_brakow)
                     polecenie_systemowe = (
                         f"SYSTEM: Wykryto krytyczny stan magazynowy! Brakuje: {lista_str}. "
@@ -87,6 +111,7 @@ async def monitor_magazynu_w_tle(agent):
                             stan_sesji["watek_id"] = str(uuid.uuid4())
                             logger.info("[SYSTEM]: Wątek zresetowany.")
                         logger.info(f"\nAGENT (Raport):\n{odpowiedz}")
+                        kolejka_powiadomien.append(odpowiedz)
                     ostatnio_zglaszane.update(nowe_braki)
         
                 # Sprawdzenie kolejki
@@ -127,6 +152,7 @@ async def monitor_magazynu_w_tle(agent):
                                 odpowiedz = odpowiedz.replace("[ZADANIE_ZAKONCZONE]", "").strip()
                                 stan_sesji["watek_id"] = str(uuid.uuid4())
                                 logger.info("Gotowanie zakończone. Wątek zresetowany.")
+                                kolejka_powiadomien.append(odpowiedz)
                         
                             logger.info(f"RAPORT AGENTA:\n{odpowiedz}")
                     
@@ -160,7 +186,12 @@ async def chat_endpoint(req: ChatRequest):
     """Natywnie asynchroniczny endpoint FastAPI."""
     if not req.polecenie.strip():
         return ChatResponse(odpowiedz="", watek_zresetowany=False)
-        
+     
+    if agent_lock.locked():
+        return ChatResponse(
+            odpowiedz="⚠️ **SYSTEM:** Agent jest w tej chwili zajęty innym zadaniem (analizuje rynek w tle). Poczekaj na jego raport i spróbuj ponownie póżniej.", 
+            watek_zresetowany=False
+        )
     logger.info(f"SZEF (Orkiestrator): {req.polecenie}")
     
     async with agent_lock:
@@ -178,6 +209,14 @@ async def chat_endpoint(req: ChatRequest):
             
         logger.info(f"AGENT:\n{odpowiedz}")
         return ChatResponse(odpowiedz=odpowiedz, watek_zresetowany=zresetowano)
+
+@app.get("/powiadomienia")
+async def pobierz_powiadomienia():
+    """Endpoint dla GUI, aby mogło odebrać wiadomości wygenerowane w tle przez Monitor."""
+    global kolejka_powiadomien
+    kopia = kolejka_powiadomien.copy()
+    kolejka_powiadomien.clear() # Czyścimy skrzynkę po odebraniu
+    return {"nowe_wiadomosci": kopia}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8022)

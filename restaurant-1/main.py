@@ -115,25 +115,16 @@ class CookRequest(BaseModel):
 # REST API Endpoints for Orchestrator & Human Operator
 # -----------------------------------------------------------------------------
 
-@app.get("/", tags=["Info"])
-async def root():
-    """Główny manifest węzła Restauracji nr 1."""
-    return {
-        "node_id": config.AGENT_ID,
-        "name": config.AGENT_NAME,
-        "role": "BUYER",
-        "status": "ONLINE",
-        "endpoints": {
-            "swagger_docs": "/docs",
-            "orchestrator_chat": "POST /chat",
-            "status": "GET /status",
-            "inventory": "GET /inventory",
-            "wallet": "GET /wallet",
-            "cook": "POST /cook",
-            "audit": "POST /audit",
-            "mcp_sse": "GET /sse",
-        },
-    }
+from fastapi.responses import HTMLResponse
+
+
+@app.get("/", tags=["UI Dashboard"], response_class=HTMLResponse)
+async def serve_dashboard():
+    """Zwraca wizualny panel sterowania dla restauracji."""
+    html_path = CURRENT_DIR / "templates" / "index.html"
+    if html_path.exists():
+        return html_path.read_text(encoding="utf-8")
+    return "<h3>Brak pliku szablonu w katalogu templates/index.html</h3>"
 
 
 @app.get("/health", tags=["Monitoring"])
@@ -274,7 +265,6 @@ def main():
         f"(REST API: /docs, /chat | MCP: /sse)"
     )
     uvicorn.run(app, host="127.0.0.1", port=config.PORT, log_level="info")
-
 
 if __name__ == "__main__":
     main()

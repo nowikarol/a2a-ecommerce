@@ -9,6 +9,36 @@ def get_warehouse_stock() -> List[Dict[str, Any]]:
     """Zwraca aktualny stan magazynowy Hurtowni H1."""
     return sql_funcs.db_get_all_products()
 
+@tool
+def get_low_stock_items() -> List[Dict[str, Any]]:
+    """
+    Sprawdza magazyn i zwraca listę produktów poniżej progu min_threshold oraz bezpieczny poziom docelowy dla każdego produktu.
+    """
+    all_products = sql_funcs.db_get_all_products()
+    low_stock_report = []
+    
+    for p in all_products:
+        current = float(p["quantity"])
+        threshold = float(p.get("min_threshold", 20.0))
+        unit = p.get("unit", "kg")
+        
+        if current < threshold:
+            target_stock = threshold * 2.0
+            needed_quantity = target_stock - current
+            recommended_qty = int(round(needed_quantity))
+            if recommended_qty <= 0:
+                recommended_qty = int(round(threshold))
+            
+            low_stock_report.append({
+                "name": p["name"],
+                "current_quantity": current,
+                "unit": unit,
+                "min_threshold": threshold,
+                "recommended_quantity": recommended_qty
+            })
+            
+    return low_stock_report
+
 
 @tool
 def check_balance() -> Dict[str, float]:
