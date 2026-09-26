@@ -130,8 +130,9 @@ klienta, np. w `NODE_ENDPOINTS`):
 
 ### Uruchomienie wszystkich serwerów naraz
 
-Użyj `start_all.bat` z katalogu głównego repo — otwiera 5 osobnych
-okien terminala, po jednym na serwer (P1, R1, R2, H1, H2).
+Użyj `start_all.bat` z katalogu głównego repo — otwiera osobne okna terminala dla wszystkich modułów ekosystemu (P1, H1, H2, R1, R2 MCP, R2 Agent LangGraph oraz Nakładka Wizualizatora WWW).
+
+Aby bezpiecznie zatrzymać wszystkie procesy i zwolnić porty, użyj `stop_all.bat`.
 
 ---
 
@@ -139,10 +140,12 @@ okien terminala, po jednym na serwer (P1, R1, R2, H1, H2).
 
 ## Szybki start (skrót)
 
-```
+```cmd
 py -3.12 -m venv venv
-venv\Scripts\activate          # lub .\venv\Scripts\Activate.ps1 w PowerShell
+venv\Scripts\activate
 pip install -r requirements.txt
 # utwórz .env oraz dodaj zmienna GOOGLE_API_KEY
 start_all.bat
+# po zakończeniu pracy:
+stop_all.bat
 ```
