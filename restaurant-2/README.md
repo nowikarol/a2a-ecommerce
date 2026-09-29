@@ -9,20 +9,19 @@ Projekt składa się z serwera nasłuchującego na dostawy, REST API z orkiestra
 - [Główne Funkcjonalności](#główne-funkcjonalności)
 - [Struktura Projektu](#struktura-projektu)
 - [Narzędzia Agenta i Serwera (Tools)](#narzędzia-agenta-i-serwera-tools)
-- [Konfiguracja Środowiska (.env)](#konfiguracja-środowiska-env)
 - [Protokół CNP (5 Kroków)](#protokół-cnp-5-kroków)
+- [Konfiguracja Środowiska (.env)](#konfiguracja-środowiska-env)
 - [Uruchomienie Systemu](#uruchomienie-systemu)
 
 ---
 
 ## ✨ Główne Funkcjonalności
-
-🗄️ **Relacyjna baza danych SQL (`data/restauracja_2.db`):** Zarządza magazynem surowców (w tym progami bezpieczeństwa), portfelem finansowym (w PLN), recepturami, historią transakcji oraz kolejką zamówień kuchennych. Działa w trybie WAL (Write-Ahead Logging) dla obsługi współbieżności.
-🤖 **Proaktywny Agent AI:** Działa w oparciu o precyzyjny prompt systemowy. Agent podejmuje decyzje biznesowe, rezerwuje budżet, ale nigdy samodzielnie nie wydaje pieniędzy bez autoryzacji "Szefa" (zasada Human-in-the-Loop).
-🔄 **Monitor Magazynu (Background Task):** Niezależny proces działający w tle skanuje bazę co 15 sekund. W przypadku wykrycia braków magazynowych (poniżej progu bezpieczeństwa), automatycznie inicjuje proces poszukiwania ofert u hurtowników. Oczekujące zamówienia kuchenne są samoczynnie wznawiane po zaksięgowaniu dostawy.
-🧠 **Dynamiczny Router Narzędzi LLM:** Jeśli zewnętrzna hurtownia zmieni nazwę swoich narzędzi MCP, wbudowany agent-router (w `client.py`) dynamicznie dopasuje intencję akcji do dostępnych u dostawcy narzędzi na podstawie ich opisów.
-📊 **Panel Dowodzenia (Streamlit GUI):** Interaktywny interfejs pozwalający na komunikację z Agentem na czacie, podgląd stanu magazynu w czasie rzeczywistym, weryfikację budżetu oraz odbiór powiadomień z procesów działających w tle.
-🛡️ **Ochrona przed Race Condition:** System obsługuje scenariusze, w których zwycięska hurtownia wyprzeda towar w trakcie trwania negocjacji. Agent automatycznie proponuje wtedy drugą najtańszą ofertę (Fallback).
+* 🗄️ **Relacyjna baza danych SQL (`data/restauracja_2.db`):** Zarządza magazynem surowców (w tym progami bezpieczeństwa), portfelem finansowym (w PLN), recepturami, historią transakcji oraz kolejką zamówień kuchennych. Działa w trybie WAL (Write-Ahead Logging) dla obsługi współbieżności.
+* 🤖 **Proaktywny Agent AI:** Działa w oparciu o precyzyjny prompt systemowy. Agent podejmuje decyzje biznesowe, rezerwuje budżet, ale nigdy samodzielnie nie wydaje pieniędzy bez autoryzacji "Szefa" (zasada Human-in-the-Loop).
+* 🔄 **Monitor Magazynu (Background Task):** Niezależny proces działający w tle skanuje bazę co 15 sekund. W przypadku wykrycia braków magazynowych (poniżej progu bezpieczeństwa), automatycznie inicjuje proces poszukiwania ofert u hurtowników. Oczekujące zamówienia kuchenne są samoczynnie wznawiane po zaksięgowaniu dostawy.
+* 🧠 **Dynamiczny Router Narzędzi LLM:** Jeśli zewnętrzna hurtownia zmieni nazwę swoich narzędzi MCP, wbudowany agent-router (w `client.py`) dynamicznie dopasuje intencję akcji do dostępnych u dostawcy narzędzi na podstawie ich opisów.
+* 📊 **Panel Dowodzenia (Streamlit GUI):** Interaktywny interfejs pozwalający na komunikację z Agentem na czacie, podgląd stanu magazynu w czasie rzeczywistym, weryfikację budżetu oraz odbiór powiadomień z procesów działających w tle.
+* 🛡️ **Ochrona przed Race Condition:** System obsługuje scenariusze, w których zwycięska hurtownia wyprzeda towar w trakcie trwania negocjacji. Agent automatycznie proponuje wtedy drugą najtańszą ofertę (Fallback).
 
 ---
 
@@ -95,6 +94,7 @@ Agent ściśle przestrzega zdefiniowanego 5-etapowego algorytmu operacji handlow
 3. **Oferta i Decyzja** (`CallForProposal`): Zbieranie wycen tylko od hurtowni z dostępnym towarem. Agent wybiera ofertę o najniższym całkowitym koszcie (`total_cost`), sprawdza budżet w bazie danych i wymaga zgody Szefa na zakup.
 4. **Finalizacja** (`AcceptProposal`): Transakcja zawierana u zwycięzcy. Zasada milczenia: system nie wysyła wiadomości do przegranych (ich oferty po prostu wygasają).
 5. **Dostawa** (`Delivery`): Zewnętrzna hurtownia używa zdalnego narzędzia na naszym serwerze MCP (plik `server.py`), aby zrzucić towar. Baza aktualizuje stany magazynowe i portfel w ramach bezpiecznej transakcji ACID.
+
 ---
 
 ## ⚙️ Konfiguracja Środowiska (.env)
@@ -114,6 +114,7 @@ R2_API_PORT=8022
 ```bash
 pip install fastapi uvicorn aiosqlite langchain langchain-core langchain-google-genai langgraph mcp fastmcp pydantic python-dotenv streamlit requests
 ```
+
 ---
 
 ## 🚀 Uruchomienie Systemu
@@ -134,3 +135,5 @@ Panel dowodzenia (Dashboard), za pomocą którego wchodzisz w interakcje z agent
 streamlit run gui.py
 ```
 Po uruchomieniu wszystkich trzech modułów aplikacja jest w pełni gotowa do przyjmowania poleceń i automatycznej współpracy z zewnętrznymi węzłami (Hurtowniami).
+
+---
