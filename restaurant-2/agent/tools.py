@@ -299,7 +299,7 @@ def przygotuj_danie(nazwa_dania: str, ilosc_porcji: int = 1) -> str:
             # Odejmujemy wymagane surowce ze stanu magazynowego
             for nazwa_produktu, potrzebna_ilosc in zapotrzebowanie:
                 cursor.execute(
-                    "UPDATE magazyn SET ilosc = ilosc - ? WHERE nazwa_produktu COLLATE NOCASE = ?",
+                    "UPDATE magazyn SET ilosc = ROUND(ilosc - ?, 2) WHERE nazwa_produktu COLLATE NOCASE = ?",
                     (potrzebna_ilosc, nazwa_produktu)
                 )
             # Jeśli to zadanie wcześniej było w kolejce oczekujących, to zdejmujemy z niego ten status, oznaczając jako zrealizowane.

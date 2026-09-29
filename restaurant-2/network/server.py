@@ -7,12 +7,7 @@ from pydantic import ValidationError
 from data.database import db_file
 from data.models import Delivery
 
-# Konfiguracja zapisująca logi JEDNOCZEŚNIE do konsoli (dla Orkiestratora) i do pliku (dla GUI)
 log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-
-# Handler do pliku (mode='a' oznacza dopisywanie na końcu pliku)
-file_handler = logging.FileHandler('r2_system.log', mode='a', encoding='utf-8')
-file_handler.setFormatter(log_formatter)
 
 # Handler do konsoli
 stream_handler = logging.StreamHandler(sys.stderr)
@@ -21,7 +16,7 @@ stream_handler.setFormatter(log_formatter)
 # Główna konfiguracja
 logging.basicConfig(
     level=logging.INFO, 
-    handlers=[file_handler, stream_handler],
+    handlers=[stream_handler],
     force=True
     )
 logger = logging.getLogger("R2_SERVER_MCP")

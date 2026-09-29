@@ -5,9 +5,6 @@ import os
 
 st.set_page_config(page_title="Restauracja 2 - Panel", page_icon="🍕", layout="wide")
 
-# ==========================================
-# WSTRZYKNIĘCIE CSS DLA NOWOCZESNEGO WYGLĄDU
-# ==========================================
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
@@ -203,7 +200,7 @@ def panel_danych():
                         status_icon = "✅"
                         qty_color = "#f8fafc"
                     
-                    grid_html += f'<div class="inv-card"><div class="inv-name">{nazwa}</div><div class="inv-bottom"><div><span class="inv-qty" style="color: {qty_color};">{ilosc}</span><span class="inv-unit">{jedn}</span></div><div class="inv-status {status_class}">{status_icon}</div></div></div>'
+                    grid_html += f'<div class="inv-card"><div class="inv-name">{nazwa}</div><div class="inv-bottom"><div><span class="inv-qty" style="color: {qty_color};">{ilosc:.2f}</span><span class="inv-unit">{jedn}</span></div><div class="inv-status {status_class}">{status_icon}</div></div></div>'
                     
                 grid_html += '</div>'
                 st.markdown(grid_html, unsafe_allow_html=True)
