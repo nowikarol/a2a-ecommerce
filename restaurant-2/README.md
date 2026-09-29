@@ -1,121 +1,139 @@
-# Agent API i Serwer MCP - Restauracja nr 2 (`R2`)
+# 🍕 Restauracja nr 2 (`R2`) - Autonomiczny Agent Zaopatrzeniowy (MAS)
 
-Autonomiczny, w pełni asynchroniczny węzeł handlowy Restauracji nr 2 w systemie wieloagentowym (MAS) łańcucha dostaw. Węzeł komunikuje się za pomocą **Model Context Protocol (FastMCP)**, jest zasilany przez inteligencję **Google Gemini 3.1 Flash-lite (via LangChain)** i ściśle realizuje 5-etapowy standard **Contract Net Protocol (CNP)**.
-
-Aplikacja została zaprojektowana jako nowoczesne REST API na silniku **FastAPI**, gotowe do sterowania przez zewnętrzne narzędzia (np. Orkiestrator).
+Nowoczesny, w pełni asynchroniczny węzeł handlowy Restauracji nr 2, działający w architekturze wieloagentowego łańcucha dostaw (Multi-Agent System). Aplikacja jest zasilana przez model Google Gemini 3.1 Flash-Lite (za pośrednictwem LangChain), integruje komunikację sieciową za pomocą Model Context Protocol (FastMCP) i rygorystycznie przestrzega standardu Contract Net Protocol (CNP) w procesach zakupowych.
+Projekt składa się z serwera nasłuchującego na dostawy, REST API z orkiestratorem (FastAPI), interfejsu graficznego dla użytkownika (Streamlit) oraz monitora działającego w tle.
 
 ---
 
 ## 📋 Spis Treści
-- [Architektura i Rola Agenta](#architektura-i-rola-agenta)
-- [Tematyczna Struktura Modułów](#tematyczna-struktura-modułów)
-- [Separacja Narzędzi: Serwer MCP vs Agent LLM](#separacja-narzędzi-serwer-mcp-vs-agent-llm)
-- [Konfiguracja Środowiska (.env)](#konfiguracja-środowiska-env)
+- [Główne Funkcjonalności](#główne-funkcjonalności)
+- [Struktura Projektu](#struktura-projektu)
+- [Narzędzia Agenta i Serwera (Tools)](#narzędzia-agenta-i-serwera-tools)
 - [Protokół CNP (5 Kroków)](#protokół-cnp-5-kroków)
+- [Konfiguracja Środowiska (.env)](#konfiguracja-środowiska-env)
+- [Uruchomienie Systemu](#uruchomienie-systemu)
 
 ---
 
-## 🏗️ Architektura i Rola Agenta
-
-Restauracja nr 2 (`R2`) charakteryzuje się proaktywnym podejściem "AI-First" połączonym z twardymi regułami biznesowymi (SQLite):
-
-1. **Relacyjna baza danych SQL (`data/restauracja_2.db`):** Zarządza magazynem surowców (w tym progami bezpieczeństwa), portfelem finansowym (w PLN), recepturami, historią transakcji oraz kolejką zamówień kuchennych. Baza inicjalizuje się automatycznie ze skryptu `.sql` w przypadku pierwszego uruchomienia.
-2. **Podejście Human-in-the-Loop:** Model LLM bada rynek, zbiera wyceny i rekomenduje najtańszy zakup, ale zgodnie z propmptem systemowym zawsze zatrzymuje się w Kroku 3, prosząc "Szefa" (Orkiestratora) o ostateczną autoryzację transakcji.
-3. **Zasada Braku Domysłów:** Zapobiegająca halucynacjom reguła systemowa gwarantująca, że w przypadku przerwania wątku i utraty kontekstu, model nie odgadnie brakującego surowca, lecz zapyta użytkownika o precyzację.
-4. **Automatyczny Reset Wątków:** Gdy Agent umieści w swojej wypowiedzi sygnaturę `[ZADANIE_ZAKONCZONE]`, system samodzielnie wyczyści jego pamięć (LangGraph Checkpointer) przywracając bazowy UUID sesji. Oszczędza to tokeny i zapobiega "przywiązywaniu się" modelu do starych scenariuszy.
+## ✨ Główne Funkcjonalności
+* 🗄️ **Relacyjna baza danych SQL (`data/restauracja_2.db`):** Zarządza magazynem surowców (w tym progami bezpieczeństwa), portfelem finansowym (w PLN), recepturami, historią transakcji oraz kolejką zamówień kuchennych. Działa w trybie WAL (Write-Ahead Logging) dla obsługi współbieżności.
+* 🤖 **Proaktywny Agent AI:** Działa w oparciu o precyzyjny prompt systemowy. Agent podejmuje decyzje biznesowe, rezerwuje budżet, ale nigdy samodzielnie nie wydaje pieniędzy bez autoryzacji "Szefa" (zasada Human-in-the-Loop).
+* 🔄 **Monitor Magazynu (Background Task):** Niezależny proces działający w tle skanuje bazę co 15 sekund. W przypadku wykrycia braków magazynowych (poniżej progu bezpieczeństwa), automatycznie inicjuje proces poszukiwania ofert u hurtowników. Oczekujące zamówienia kuchenne są samoczynnie wznawiane po zaksięgowaniu dostawy.
+* 🧠 **Dynamiczny Router Narzędzi LLM:** Jeśli zewnętrzna hurtownia zmieni nazwę swoich narzędzi MCP, wbudowany agent-router (w `client.py`) dynamicznie dopasuje intencję akcji do dostępnych u dostawcy narzędzi na podstawie ich opisów.
+* 📊 **Panel Dowodzenia (Streamlit GUI):** Interaktywny interfejs pozwalający na komunikację z Agentem na czacie, podgląd stanu magazynu w czasie rzeczywistym, weryfikację budżetu oraz odbiór powiadomień z procesów działających w tle.
+* 🛡️ **Ochrona przed Race Condition:** System obsługuje scenariusze, w których zwycięska hurtownia wyprzeda towar w trakcie trwania negocjacji. Agent automatycznie proponuje wtedy drugą najtańszą ofertę (Fallback).
 
 ---
 
-## 📁 Tematyczna Struktura Modułów
+## 📁 Struktura Projektu
 
 Projekt zachowuje ścisłą separację warstw (Separation of Concerns):
-
 ```text
 Restauracja_2/
-├── data/                       # WARSTWA DANYCH I MODELI
+├── data/                       # WARSTWA DANYCH (Baza i Walidacja)
 │   ├── models.py               # Modele Pydantic (CNP: CallForProposal, AcceptProposal, Delivery)
-│   ├── database.py             # Inicjalizacja bazy SQLite i konfiguracja trybu WAL
-│   ├── baza_r2_projektA2A.sql  # Skrypt startowy (schemat i dane początkowe)
-│   └── restauracja.db          # Plik bazy danych SQLite (generowany automatycznie)
+│   ├── database.py             # Logika SQLite, konfiguracja trybu WAL dla współbieżności
+│   └── baza_r2_projektA2A.sql  # Schemat DDL SQL i dane startowe (seed)
 │
 ├── agent/                      # WARSTWA INTELIGENCJI
-│   ├── agent.py                # Konfiguracja LLM (LangChain, Prompt Systemowy, Pamięć)
-│   └── tools.py                # Zestaw prywatnych narzędzi Agenta (SQL + Sieć)
+│   ├── agent.py                # Konfiguracja LangChain, pamięć LangGraph, Prompt Systemowy
+│   └── tools.py                # Narzędzia Agenta (dostęp do SQL i wywoływanie sieci)
 │
-├── network/                    # WARSTWA KOMUNIKACJI SIECIOWEJ (MCP / A2A)
-│   ├── server.py               # Publiczny Serwer FastMCP (odbiór dostaw)
-│   └── client.py               # Asynchroniczny Klient SSE + LLM Router
+├── network/                    # WARSTWA KOMUNIKACJI (MCP)
+│   ├── server.py               # Publiczny Serwer FastMCP (odbieranie towaru - `receive_delivery`)
+│   └── client.py               # Asynchroniczny Klient SSE MCP z systemem Fallback/LLM Router
 │
-├── Projekt_A2A.py              # Główny punkt wejścia (API FastAPI + Lifespan + Monitor)
-└── .env                        # Zmienne środowiskowe (klucze, porty, URL-e)
+├── Projekt_A2A.py              # Główny silnik (FastAPI, Monitor w tle, Endpointy czatu)
+├── gui.py                      # Aplikacja frontendowa (Streamlit Dashboard)
+└── .env                        # Zmienne środowiskowe (klucze API, porty, URL-e hurtowni)
 ```
 
 ---
 
-## 🛡️ Separacja Narzędzi: Serwer MCP vs Agent LLM
+## 🛠️ Narzędzia Agenta i Serwera (Tools)
 
-W celu zapewnienia pełnego bezpieczeństwa handlowego, wdrożono ścisły podział narzędzi:
+System wykorzystuje ściśle odseparowane narzędzia do zarządzania wewnętrzną logiką oraz komunikacji ze światem zewnętrznym.
 
-### 1. Publiczny Serwer MCP (`network/server_4.py`) – Dostępny dla Sieci
-Wystawia **wyłącznie** bezpieczne punkty styku przy użyciu dekoratora `@mcp.tool()` dla Hurtowni:
-* `receive_delivery`: Służy hurtowniom do zrzucenia towaru po wygranym przetargu. Waliduje model `Delivery` przez Pydantic, realizuje transakcję ACID na dwóch tabelach (potrąca z `konto` i dopisuje do `magazyn`) oraz rejestruje ten fakt w logach.
+### 🤖 Narzędzia Agenta (Wykonywane Lokalnie)
+Narzędzia przypisane do Agenta LLM, pozwalające mu odczytywać dane i modyfikować procesy wewnętrzne:
 
-### 2. Prywatne Narzędzia Agenta (`agent/tools_4.py`) – Wykonywane Lokalnie
-Dostępne wyłącznie dla "mózgu" Gemini przy użyciu dekoratora `@tool` z biblioteki LangChain:
-1. `sprawdz_magazyn()`: Monitorowanie stanu zapasów z bazy.
-2. `sprawdz_stan_konta()`: Weryfikacja budżetu (PLN) przed akceptacją ofert.
-3. `sprawdz_dostepnosc_w_hurtowniach()`: Współbieżnie odpytuje rynek o surowiec przed zleceniem wycen.
-4. `zbierz_oferty_z_hurtowni()`: Współbieżnie wysyła zapytania `CALL_FOR_PROPOSAL` jedynie do tych, którzy mają towar.
-5. `finalizuj_zakup()`: Wysyła asynchroniczny komunikat `ACCEPT_PROPOSAL` pod konkretny adres zwycięzcy z zachowaniem reguły milczenia wobec odrzuconych. Zabezpieczony przed wystąpieniem błędu wyprzedanego towaru (Race Condition).
-6. `oblicz_braki_dla_dania()`: Pomocnicza logika wyliczeniowa nałożona na przepisy z tabeli SQL.
-7. `przygotuj_danie()`: Pobiera składniki, ale w razie deficytu kolejkuje posiłek w specjalnej tabeli `zadania_oczekujace`.
-8. `wplac_srodki()`: Rejestracja manualnego zasilenia portfela przez Szefa.
----
+1. **`sprawdz_magazyn(nazwa_produktu)`**
+   Sprawdza fizyczny stan konkretnego produktu (ilość i jednostkę) w bazie SQLite.
+2. **`sprawdz_stan_konta()`**
+   Zwraca aktualny balans konta restauracji w PLN, niezbędny do sprawdzenia, czy budżet pozwala na opłacenie zebranych ofert.
+3. **`sprawdz_dostepnosc_w_hurtowniach(produkt, ilosc)`**
+   Asynchronicznie, w sposób zrównoleglony odpytuje zdefiniowane w systemie hurtownie (wysyła model `AvailabilityRequest`), czy posiadają na stanie zadaną ilość towaru. Nie pyta o cenę.
+4. **`oblicz_braki_dla_dania(nazwa_dania, ilosc_porcji)`**
+   Rozbija danie na poszczególne składniki bazując na tabeli przepisów. Weryfikuje wymaganą ilość z aktualnym stanem magazynu i zwraca precyzyjną listę braków.
+5. **`zbierz_oferty_z_hurtowni(produkt, ilosc, dostepne_hurtownie)`**
+   Kieruje zapytania ofertowe (`CallForProposal`) równolegle *wyłącznie* do hurtowni wyselekcjonowanych w poprzednim etapie. Zwraca raport z wycenami.
+6. **`finalizuj_zakup(wygrana_hurtownia, produkt, ilosc, cena_jednostkowa, koszt_calkowity)`**
+   Wysyła komunikat `AcceptProposal` do zwycięzcy przetargu. Narzędzie obsługuje błędy typu "Race Condition" – potrafi przechwycić informację z hurtowni o tym, że towar został wyprzedany w międzyczasie. Zgodnie z zasadą milczenia protokołu CNP, nie powiadamia przegranych hurtowni.
+7. **`wplac_srodki(kwota, opis)`**
+   Pozwala Agentowi obsłużyć sytuację, w której Szef decyduje się na zewnętrzne zasilenie (dokapitalizowanie) konta restauracji.
+8. **`przygotuj_danie(nazwa_dania, ilosc_porcji)`**
+   Fizycznie realizuje zamówienie w kuchni poprzez odjęcie składników z magazynu. Jeśli surowców brakuje, dodaje wpis do tabeli `zadania_oczekujace` (skąd zostanie wzniesione przez Monitor zaraz po przyszłej dostawie).
 
-## ⚙️ Konfiguracja Środowiska (.env)
+### 🌐 Narzędzia Serwera (Publiczne FastMCP)
+Udostępniane "na zewnątrz" dla hurtowni.
 
-Przed uruchomieniem upewnij się, że posiadasz plik `.env` w głównym katalogu projektu z poprawnymi danymi (zaktualizuj porty na te, z których korzystają węzły Hurtowni):
+1. **`receive_delivery(delivery_data)`**
+   Zdalne narzędzie wystawione na serwerze (port 8003). Odbiera wygenerowany przez hurtownię dokument dostawy (`Delivery`). Waliduje go za pomocą Pydantic, potrąca należność z konta w transakcji ACID, aktualizuje stan magazynowy o dostarczony towar i loguje zdarzenie do historii.
 
-```env
-GOOGLE_API_KEY=twój_klucz_dostępu_z_Google_AI_Studio
-H1_MCP_URL=http://127.0.0.1:8004/mcp/sse
-H2_MCP_URL=http://127.0.0.1:8005/mcp/sse
-```
-
-Wymagane biblioteki Pythona (zainstalowane w środowisku wirtualnym venv):
-
-```bash
-pip install fastapi uvicorn aiosqlite langchain langchain-core langchain-google-genai langgraph mcp fastmcp pydantic python-dotenv
-```
+### 🧠 Narzędzia Sieciowe (LLM Router)
+1. **`dopasuj_narzedzie_llm(dostepne_narzedzia, intencja)`**
+   Mechanizm odpornościowy klienta asynchronicznego. Zamiast "na sztywno" wywoływać nazwy narzędzi u zdalnego partnera, przesyła udostępnioną listę z serwera do dodatkowego małego modelu LLM. Model analizując intencję wybiera poprawne narzędzie, co uniezależnia Restaurację od ewentualnych zmian nazewnictwa API w hurtowniach.
 
 ---
 
 ## 🤝 Protokół CNP (5 Kroków)
+Agent ściśle przestrzega zdefiniowanego 5-etapowego algorytmu operacji handlowych:
 
-Agent operuje rygorystycznym przepływem:
-
-1. **Dostępność (`AvailabilityRequest`):** Bez odpytywania o cenę, sprawdza najpierw stany fizyczne hurtowni.
-2. **Oferta (`CallForProposal`):** Zbiera wyceny jedynie od dostawców ze zweryfikowanym asortymentem.
-3. **Decyzja:** Determinacja najlepszej oferty (`total_cost`), weryfikacja zasobów w portfelu i żądanie ostatecznego zatwierdzenia przez operatora API (Orkiestrator).
-4. **Finalizacja (`AcceptProposal`):** W razie pomyślnego zakupu wywołuje transakcję (Zasada milczenia). Jeśli hurtownia odeśle błąd `REJECT_PROPOSAL` wynikający np. ze sprzedaży towaru w międzyczasie innej restauracji (Race Condition), Agent od razu przełącza plan na drugą najtańszą ofertę (Fallback).
-5. **Dostawa (`Delivery`):** Serwer MCP (niezależny od Agenta LLM) pasywnie nasłuchuje na dostawę towaru, potrącając gotówkę i wpisując ładunek na magazyn.
+1. **Identyfikacja Potrzeb**: Szef zleca zakup lub gotowanie dania (braki są wyliczane na podstawie tabeli `przepisy`). Ewentualnie monitor w tle sam zgłasza deficyt.
+2. **Dostępność** (`AvailabilityRequest`): Równoległe odpytanie hurtowni o fizyczny stan magazynowy (bez pytania o cenę!).
+3. **Oferta i Decyzja** (`CallForProposal`): Zbieranie wycen tylko od hurtowni z dostępnym towarem. Agent wybiera ofertę o najniższym całkowitym koszcie (`total_cost`), sprawdza budżet w bazie danych i wymaga zgody Szefa na zakup.
+4. **Finalizacja** (`AcceptProposal`): Transakcja zawierana u zwycięzcy. Zasada milczenia: system nie wysyła wiadomości do przegranych (ich oferty po prostu wygasają).
+5. **Dostawa** (`Delivery`): Zewnętrzna hurtownia używa zdalnego narzędzia na naszym serwerze MCP (plik `server.py`), aby zrzucić towar. Baza aktualizuje stany magazynowe i portfel w ramach bezpiecznej transakcji ACID.
 
 ---
 
-## 🚀 Uruchomienie
+## ⚙️ Konfiguracja Środowiska (.env)
 
-Aby podnieść ten węzeł systemu, wymagane są dwa niezależne okna terminala:
+1. Przed uruchomieniem upewnij się, że posiadasz plik `.env` w głównym katalogu projektu:
 
-### Terminal 1 (Serwer Nasłuchowy MCP – Przyjmujący Towar)
-Zainicjuje on bazę SQLite (jeśli jej brak) i nasłuchuje na porcie 8003 na komunikaty DELIVERY z hurtowni
+```env
+GOOGLE_API_KEY=twój_klucz_dostępu_z_Google_AI_Studio
+H1_MCP_URL=http://127.0.0.1:8004/mcp/sse
+H2_MCP_URL=http://127.0.0.1:8005/sse
+R2_MCP_PORT=8003
+R2_API_PORT=8022
+```
+  
+2. Upewnij się, że masz aktywne środowisko wirtualne Pythona (`venv`), a następnie zainstaluj wymagane pakiety:
 
+```bash
+pip install fastapi uvicorn aiosqlite langchain langchain-core langchain-google-genai langgraph mcp fastmcp pydantic python-dotenv streamlit requests
+```
+
+---
+
+## 🚀 Uruchomienie Systemu
+Z uwagi na rozproszoną i asynchroniczną naturę aplikacji (oraz działanie GUI), do pełnego uruchomienia Restauracji nr 2 potrzebujesz trzech niezależnych okien terminala.
+### Terminal 1: Serwer Nasłuchowy MCP
+Ten proces odpowiada za przyjmowanie dostaw (narzędzie `receive_delivery`). Udostępnia serwer MCP na porcie 8003.
 ```bash
 python network/server.py
 ```
-
-### Terminal 2 (Główna Aplikacja Agenta i Monitor w Tle)
-Wystawia on serwer asynchroniczny API na porcie 8022. Od razu zacznie działać Monitor, sprawdzając w pętli I/O stany magazynowe
-
+### Terminal 2: Orkiestrator (API FastAPI + Monitor)
+Ten proces uruchamia logikę Agenta, API do komunikacji oraz monitor działający w tle (sprawdzanie stanów magazynowych). Działa na porcie 8022.
 ```bash
 python Projekt_A2A.py
 ```
+### Terminal 3: Interfejs Użytkownika (Streamlit)
+Panel dowodzenia (Dashboard), za pomocą którego wchodzisz w interakcje z agentem i monitorujesz swoją restaurację. Aplikacja otworzy się automatycznie w Twojej przeglądarce (domyślnie port 8501).
+```bash
+streamlit run gui.py
+```
+Po uruchomieniu wszystkich trzech modułów aplikacja jest w pełni gotowa do przyjmowania poleceń i automatycznej współpracy z zewnętrznymi węzłami (Hurtowniami).
+
+---
