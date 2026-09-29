@@ -46,11 +46,6 @@ echo [6/8] Uruchamianie Restauracja R2 Agent (:8022)...
 start "R2: Agent LangGraph (:8022)" cmd /k "cd /d %BASE_DIR%restaurant-2 && %VENV_ACTIVATE%python Projekt_A2A.py"
 timeout /t 2 /nobreak >nul
 
-:: 7. Restauracja R2 - GUI (Streamlit)
-echo [7/8] Uruchamianie Restauracja R2 GUI (Streamlit)...
-start "R2: GUI Panel" cmd /k "cd /d %BASE_DIR%restaurant-2 && %VENV_ACTIVATE%python -m streamlit run gui.py"
-timeout /t 1 /nobreak >nul
-
 :: 7. Restauracja R2 - Panel WWW Streamlit (port 8501)
 echo [7/8] Uruchamianie Restauracja R2 GUI Panel (:8501)...
 start "R2: Panel GUI Streamlit (:8501)" cmd /k "cd /d %BASE_DIR%restaurant-2 && %VENV_ACTIVATE%python -m streamlit run gui.py"
