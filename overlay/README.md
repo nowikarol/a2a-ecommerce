@@ -1,6 +1,6 @@
-# 🌐 A2A Supply Chain Visualizer (Nakładka Grafowa)
+# 🌐 A2A Trade Flow Demonstrator (Nakładka Prezentacyjna)
 
-Autonomiczna nakładka webowa wizualizująca w czasie rzeczywistym węzły handlowe (**Producent P1, Hurtownie H1 i H2, Restauracje R1 i R2**) oraz przesyłane między nimi komunikaty JSON w protokołach **MCP (Model Context Protocol)** i **CNP (Contract Net Protocol)**.
+Dedykowana nakładka webowa stworzona wyłącznie w celu **wizualizacji i demonstracji przebiegu handlu wieloagentowego** w łańcuchu dostaw (**Producent P1, Hurtownie H1 i H2, Restauracje R1 i R2**), w oparciu o oficjalny standard **Contract Net Protocol (CNP)** oraz **Model Context Protocol (MCP)**.
 
 ---
 
@@ -23,49 +23,59 @@ Autonomiczna nakładka webowa wizualizująca w czasie rzeczywistym węzły handl
 
 ---
 
-## 🎨 Główne Funkcjonalności
+## 🎨 Wizja Artystyczna i Architektura Demonstratora
 
-1. **Graf Sieci w Czasie Rzeczywistym (SVG):**
-   * **Węzły:**
-     * 🏭 **P1 (Producent)** – port 8001
-     * 🏢 **H1 (Hurtownia 1)** – port 8004
-     * 🏬 **H2 (Hurtownia 2)** – port 8005
-     * 🍕 **R1 (Restauracja 1)** – port 8002
-     * 🍝 **R2 (Restauracja 2)** – port 8022 / 8003
-   * **Połączenia (Krawędzie):**
-     * P1 ↔ H1, P1 ↔ H2
-     * H1 ↔ R1, H1 ↔ R2
-     * H2 ↔ R1, H2 ↔ R2
-   * **Lecące Pakiety i Piktogramy:**
-     * Gdy wysyłany jest komunikat, piktogram z opisem surowca i ilości płynnie leci po krzywej wzdłuż krawędzi od nadawcy do odbiorcy.
-     * Kodowanie kolorystyczne i piktogramy:
-       * 🔍 **AVAILABILITY_REQUEST / RESPONSE** – cyjan
-       * 📑 **CALL_FOR_PROPOSAL** – pomarańczowy
-       * 🏷️ **PROPOSAL** – złoty / bursztynowy
-       * 🤝 **ACCEPT_PROPOSAL** – zielony
-       * ❌ **REJECT_PROPOSAL** – czerwony
-       * 🚚 **DELIVERY** – fioletowy
-     * Dotarcie pakietu wywołuje falę uderzeniową (efekt ripple) oraz subtelny dźwięk syntetyzowany przez Web Audio API.
-
-2. **Podgląd i Inspekcja JSON:**
-   * Kliknięcie w dowolny przelatujący pakiet lub pozycję na pasku bocznym otwiera modal z pełnym, sformatowanym dokumentem JSON zgodnym ze schematami `docs/schemas/json-schemas/`.
-   * Przycisk szybkiego kopiowania JSON do schowka.
-
-3. **Interaktywne Sterowanie z Poziomu Nakładki:**
-   * **⚡ Pełny Cykl CNP (Demo):** Automatyczna demonstracja 5-etapowego protokołu handlowego (zapytanie o dostępność, oferty, wybór najtańszego, zamówienie u producenta i dostawa).
-   * **🍕 R1: Gotuj pizzę:** Wywołuje przygotowanie pizzy w R1, co zużywa składniki i wyzwala automatyczne przetargi w hurtowniach.
-   * **🔍 R1: Audyt:** Wywołuje natychmiastowy audyt spiżarni R1 i zapytania przetargowe.
-   * **🌾 H1: Kup u P1:** Wywołuje zamówienie mąki przez Hurtownię H1 u Producenta P1.
-   * **💬 Konsola Czat:** Umożliwia wysłanie dowolnego polecenia w języku naturalnym do agenta R1, R2 lub H1.
-
-4. **Monitoring Baz Danych i Portfeli:**
-   * Dolny pasek na żywo prezentuje saldo portfela (PLN) oraz stan katalogów/magazynów w SQLite.
-   * Kliknięcie na węzeł (np. R1, H1) otwiera szczegółową tabelę ze stanem surowców, cenami i historią transakcji.
+Nowa wersja nakładki została całkowicie przeprojektowana pod kątem **czystej, profesjonalnej demonstracji procesu handlowego**:
+* **Usunięto rozpraszające elementy**: brak paneli czatu z promptami LLM, formularzy technicznych i surowych strumieni logów.
+* **100% Focus na Procesie Handlu**: interfejs prezentuje dynamiczny graf relacji, 5-krokową oś czasu protokołu CNP, przystępną narrację biznesową każdego etapu oraz podgląd prawdziwych pakietów JSON.
 
 ---
 
-## 🔒 Bezpieczeństwo i Nienaruszalność Kodu
+## 🎬 4 Predefiniowane Scenariusze Demonstracyjne
 
-Nakładka działa jako całkowicie niezależna warstwa obserwacyjna (Sidecar Visualizer):
-* Żadne istniejące pliki w katalogach `producer/`, `restaurant-1/`, `restaurant-2/`, `warehouse-1/`, `warehouse-2/` ani `docs/` nie zostały zmodyfikowane.
-* Komunikacja opiera się na pasywnym monitorowaniu logów, bazy SQLite oraz oficjalnych interfejsach REST API.
+U góry ekranu znajduje się pasek wyboru 4 kluczowych scenariuszy handlowych:
+
+1. ⚡ **Scenariusz 1: Standardowy Cykl Handlu (CNP - Ścieżka Sukcesu)**
+   * **Aktorzy:** Restauracja R1 (Kupujący) ➔ Hurtownie H1 i H2 (Sprzedawcy).
+   * **Przebieg:** R1 weryfikuje dostępność 5 kg mąki, zbiera konkurencyjne oferty cenowe, wybiera najtańszą hurtownię (H1: 17.50 PLN vs H2: 20.00 PLN), stosuje **zasadę milczenia** wobec H2, zawiera kontrakt i odbiera dostawę z atomowym rozliczeniem w SQLite (ACID).
+
+2. ❌ **Scenariusz 2: Odrzucenie i Automatyczny Fallback**
+   * **Aktorzy:** Restauracja R1 ➔ H1 i H2.
+   * **Przebieg:** R1 wybiera najtańszą ofertę w H1, lecz towar zostaje w międzyczasie wyprzedany przez innego klienta (**Race Condition**). Hurtownia H1 zwraca `REJECT_PROPOSAL`. Autonomiczny agent R1 nie przerywa pracy, lecz natychmiast uruchamia procedurę **Fallback** – zawiera kontrakt z kolejną hurtownią (H2: 20.00 PLN) i pomyślnie zaopatruje kuchnię.
+
+3. 🌾 **Scenariusz 3: Dostawa Hurtowa od Producenta (B2B)**
+   * **Aktorzy:** Hurtownia H1 (Kupujący) ➔ Producent P1 (Sprzedający).
+   * **Przebieg:** Demonstracja rekurencji protokołu A2A (Hurtownia, która wcześniej była sprzedawcą, staje się kupującym). H1 zamawia partię 25 kg mąki po cenie fabrycznej (2.50 PLN/kg = 62.50 PLN) bezpośrednio w fabryce Producenta P1.
+
+4. 👤 **Scenariusz 4: Decyzja Człowieka (Human-in-the-Loop - HITL)**
+   * **Aktorzy:** Restauracja R2 (Kupujący) ➔ Hurtownie H1 i H2 ➔ Operator (Człowiek).
+   * **Przebieg:** Demonstracja nadzorowanej sztucznej inteligencji. Agent R2 porównuje oferty na 10 kg sera Mozzarella, identyfikuje najtańszą ofertę w H1 (85.00 PLN vs 145.00 PLN w H2), lecz **wstrzymuje proces zakupu**. W interfejsie pojawia się interaktywny panel autoryzacji: dopiero gdy człowiek kliknie `[Zatwierdź zakup]`, agent finalizuje transakcję w SQLite.
+
+---
+
+## 🔄 5-Krokowa Oś Czasu Handlu (Stepper CNP)
+
+Wizualizacja na bieżąco prezentuje postęp transakcji na osi czasu:
+* **Krok 1: 🔍 Weryfikacja Dostępności** (`AVAILABILITY_REQUEST` / `RESPONSE`)
+* **Krok 2: 🏷️ Zbieranie Ofert Cenowych** (`CALL_FOR_PROPOSAL` / `PROPOSAL`)
+* **Krok 3: ⚖️ Wybór Najlepszej Oferty** (Algorytm `min(total_cost)` i zasada milczenia)
+* **Krok 4: 🤝 Zawarcie Kontraktu / Decyzja** (`ACCEPT_PROPOSAL` / `REJECT_PROPOSAL` / `HITL`)
+* **Krok 5: 🚚 Dostawa i Rozliczenie ACID** (`DELIVERY` oraz natychmiastowa aktualizacja sald i magazynów w SQLite)
+
+---
+
+## 🛠️ Panel Narracyjny i Inspektor JSON
+
+Prawa strona ekranu zawiera:
+* **Kartę Narracyjną:** Przystępne objaśnienie w języku polskim, co dokładnie robią agenci w bieżącym kroku, wzbogacone o pole **💡 Reguła Protokołu** (wyjaśniające logikę biznesową i inżynieryjną).
+* **Inspektor JSON:** Podgląd rzeczywistej struktury przesyłanego pakietu danych (zgodnego ze schematami w `docs/schemas/json-schemas/`) wraz z przyciskiem kopiowania do schowka.
+* **Dziennik Zdarzeń Sesji:** Chronologiczny wykaz zarejestrowanych etapów bieżącego pokazu.
+
+---
+
+## 📊 Live Monitoring Baz Danych i Portfeli
+
+Na dolnym pasku na żywo prezentowane są:
+* Salda portfeli (PLN) agentów
+* Liczba pozycji magazynowych i stan spiżarni
+* Po zrealizowaniu dostawy (Krok 5) kafelki węzłów ulegają podświetleniu (**flash update**), potwierdzając widzowi, że transakcja została realnie zaksięgowana w bazach danych SQLite projektu.

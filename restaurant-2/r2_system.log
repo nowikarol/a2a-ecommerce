@@ -1,0 +1,255 @@
+2026-09-26 19:58:44,023 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-26 19:58:47,285 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-26 19:58:47,288 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-26 19:58:48,610 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-26 19:58:48,614 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-26 20:06:26,863 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-26 20:06:29,456 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-26 20:06:29,460 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-26 20:06:30,642 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-26 20:06:30,647 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-27 20:35:35,657 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-27 20:35:37,852 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-27 20:35:37,854 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-27 20:35:38,793 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-27 20:35:38,797 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-27 20:38:08,245 [INFO] R2_MAIN: SZEF (Orkiestrator): Kup 1kg mąki
+2026-09-27 20:38:13,962 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-27 20:38:13,964 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-27 20:38:13,966 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1354c923975c4d29a0dbe4111b7ca3c2 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:13,968 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64f1cae54e56419e9d4affa3ca4f9092 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:13,971 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1354c923975c4d29a0dbe4111b7ca3c2 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:13,971 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64f1cae54e56419e9d4affa3ca4f9092 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:13,972 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1354c923975c4d29a0dbe4111b7ca3c2 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:13,973 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64f1cae54e56419e9d4affa3ca4f9092 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:13,976 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64f1cae54e56419e9d4affa3ca4f9092 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:14,320 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1354c923975c4d29a0dbe4111b7ca3c2 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:19,000 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-27 20:38:19,001 [INFO] R2_MAIN: AGENT:
+Niestety, żadna z naszych hurtowni nie posiada obecnie mąki na stanie. Nie mogę zrealizować tego zakupu.
+2026-09-27 20:38:35,595 [INFO] R2_MAIN: SZEF (Orkiestrator): Buy 1 kg flour
+2026-09-27 20:38:46,011 [INFO] R2_MAIN: AGENT:
+Mamy już 20 kg mąki na stanie. Czy chcesz dokupić 1 kg jako dodatek, czy tylko dobić do żądanej wartości (co w tym przypadku oznaczałoby brak zakupu)?
+2026-09-27 20:38:56,333 [INFO] R2_MAIN: SZEF (Orkiestrator): Dokup
+2026-09-27 20:38:57,187 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-27 20:38:57,187 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-27 20:38:57,191 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c2fad772844f4e10b05903cc65764c7e "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,192 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=32ccf87891994cb5b86fb1ca52a9796f "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,194 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c2fad772844f4e10b05903cc65764c7e "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,195 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=32ccf87891994cb5b86fb1ca52a9796f "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,196 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c2fad772844f4e10b05903cc65764c7e "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,197 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=32ccf87891994cb5b86fb1ca52a9796f "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,199 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c2fad772844f4e10b05903cc65764c7e "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:57,201 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=32ccf87891994cb5b86fb1ca52a9796f "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:59,425 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-27 20:38:59,428 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1142faf19e8048e3957a9b88fbf8b0d1 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:59,430 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1142faf19e8048e3957a9b88fbf8b0d1 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:59,431 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1142faf19e8048e3957a9b88fbf8b0d1 "HTTP/1.1 202 Accepted"
+2026-09-27 20:38:59,435 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=1142faf19e8048e3957a9b88fbf8b0d1 "HTTP/1.1 202 Accepted"
+2026-09-27 20:39:00,789 [INFO] R2_MAIN: AGENT:
+Otrzymałem ofertę na zakup 1 kg mąki:
+
+- Hurtownia H2: 4.0 PLN
+
+Aktualny stan konta wynosi 14887.03 PLN, więc stać nas na ten zakup. Czy mam sfinalizować transakcję w hurtowni H2?
+2026-09-27 20:39:20,342 [INFO] R2_MAIN: SZEF (Orkiestrator): Sfinalizuj
+2026-09-27 20:39:21,540 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-27 20:39:21,543 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=323f9a1ad2744bdc93349f6ebffeffb8 "HTTP/1.1 202 Accepted"
+2026-09-27 20:39:21,545 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=323f9a1ad2744bdc93349f6ebffeffb8 "HTTP/1.1 202 Accepted"
+2026-09-27 20:39:21,546 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=323f9a1ad2744bdc93349f6ebffeffb8 "HTTP/1.1 202 Accepted"
+2026-09-27 20:39:21,550 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=323f9a1ad2744bdc93349f6ebffeffb8 "HTTP/1.1 202 Accepted"
+2026-09-27 20:39:21,879 [INFO] R2_SERVER_MCP: 
+[SERWER MCP]: Przyjęto dostawę 1x flour od H2.
+2026-09-27 20:39:26,959 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-27 20:39:26,960 [INFO] R2_MAIN: AGENT:
+Zakup 1 kg mąki w hurtowni H2 został pomyślnie sfinalizowany za kwotę 4.0 PLN.
+2026-09-29 15:27:29,664 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-29 15:27:31,813 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-29 15:27:31,815 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-29 15:27:32,740 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-29 15:27:32,744 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-29 17:29:04,869 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-29 17:29:06,891 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-29 17:29:06,893 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-29 17:29:07,912 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-29 17:29:07,916 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-29 18:24:19,585 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-29 18:24:21,815 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-29 18:24:21,817 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-29 18:24:23,101 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-29 18:24:23,105 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-29 18:24:33,569 [INFO] R2_MAIN: SZEF (Orkiestrator): Zamów 10 kg mąki
+2026-09-29 18:24:42,946 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:24:42,949 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=d58f3a783b04488a8f3cf3178891f272 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:42,949 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:24:42,953 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c9d91b4fd4764af084b19eb788244906 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:42,953 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=d58f3a783b04488a8f3cf3178891f272 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:42,955 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=d58f3a783b04488a8f3cf3178891f272 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:42,956 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c9d91b4fd4764af084b19eb788244906 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:42,958 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c9d91b4fd4764af084b19eb788244906 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:42,961 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=c9d91b4fd4764af084b19eb788244906 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:43,318 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=d58f3a783b04488a8f3cf3178891f272 "HTTP/1.1 202 Accepted"
+2026-09-29 18:24:45,180 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:24:45,180 [INFO] R2_MAIN: AGENT:
+Niestety, żadna z naszych hurtowni nie posiada obecnie 10 kg mąki na stanie. Nie mogę zrealizować tego zamówienia.
+2026-09-29 18:25:54,663 [INFO] R2_MAIN: SZEF (Orkiestrator): Order 10 flour
+2026-09-29 18:26:18,946 [INFO] R2_MAIN: AGENT:
+Mamy już 21 kg mąki na stanie. Czy chcesz dokupić 10 kg jako dodatek, czy potrzebujesz, aby stan magazynowy wynosił łącznie 10 kg?
+2026-09-29 18:26:36,416 [INFO] R2_MAIN: SZEF (Orkiestrator): Chcę dokupić kolejne 10
+2026-09-29 18:26:46,902 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:26:46,903 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:26:46,907 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=bff0f4f971554471874b1652ec32c888 "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,907 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=c78d8967f8e84c348191b7423ef0207b "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,909 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=bff0f4f971554471874b1652ec32c888 "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,910 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=c78d8967f8e84c348191b7423ef0207b "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,911 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=bff0f4f971554471874b1652ec32c888 "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,912 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=c78d8967f8e84c348191b7423ef0207b "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,914 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=bff0f4f971554471874b1652ec32c888 "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:46,916 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=c78d8967f8e84c348191b7423ef0207b "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:55,269 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:26:55,272 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=7d3ab6b514af4178b63f0f27f55491aa "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:55,274 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=7d3ab6b514af4178b63f0f27f55491aa "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:55,275 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=7d3ab6b514af4178b63f0f27f55491aa "HTTP/1.1 202 Accepted"
+2026-09-29 18:26:55,279 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=7d3ab6b514af4178b63f0f27f55491aa "HTTP/1.1 202 Accepted"
+2026-09-29 18:27:00,573 [INFO] google_genai._api_client: Retrying google.genai._api_client.BaseApiClient._async_request_once in 1.26 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
+2026-09-29 18:27:09,455 [INFO] R2_MAIN: AGENT:
+Szefie, przygotowałem raport dla zakupu 10 kg mąki:
+
+*   **Dostępność:** Hurtownia H2 posiada towar.
+*   **Koszt:** 40.00 PLN.
+*   **Stan konta:** 14713.03 PLN (stać nas na ten zakup).
+
+Czy akceptujesz zakup 10 kg mąki w hurtowni H2 za łączną kwotę 40.00 PLN? Czekam na decyzję.
+2026-09-29 18:27:44,858 [INFO] R2_MAIN: SZEF (Orkiestrator): A co z H1?
+2026-09-29 18:27:48,431 [INFO] R2_MAIN: AGENT:
+Hurtownia H1 zgłosiła błąd komunikacji podczas sprawdzania dostępności, dlatego nie mogłem pobrać od niej oferty cenowej. W związku z tym, jedyną dostępną i zweryfikowaną ofertę na ten moment posiada hurtownia H2.
+
+Czy akceptujesz zakup 10 kg mąki w hurtowni H2 za łączną kwotę 40.00 PLN?
+2026-09-29 18:28:21,639 [INFO] R2_MAIN: SZEF (Orkiestrator): Dokup 10 kg mąki
+2026-09-29 18:28:26,265 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:28:26,268 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=debc3b468dc34861a2d6011a8a0d3b7a "HTTP/1.1 202 Accepted"
+2026-09-29 18:28:26,270 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=debc3b468dc34861a2d6011a8a0d3b7a "HTTP/1.1 202 Accepted"
+2026-09-29 18:28:26,271 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=debc3b468dc34861a2d6011a8a0d3b7a "HTTP/1.1 202 Accepted"
+2026-09-29 18:28:26,277 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=debc3b468dc34861a2d6011a8a0d3b7a "HTTP/1.1 202 Accepted"
+2026-09-29 18:28:26,757 [INFO] R2_SERVER_MCP: 
+[SERWER MCP]: Przyjęto dostawę 10x flour od H2.
+2026-09-29 18:28:32,973 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:28:32,974 [INFO] R2_MAIN: AGENT:
+Zakup 10 kg mąki w hurtowni H2 został pomyślnie sfinalizowany. Towar jest w drodze.
+2026-09-29 18:36:28,603 [INFO] R2_SERVER_MCP: Uruchomiono lokalny serwer MCP na porcie 8003 (adres: http://127.0.0.1:8003/sse)
+2026-09-29 18:36:30,828 [INFO] R2_TOOLS: [BAZA]: Baza danych już istnieje. Wczytuję zapisany stan.
+2026-09-29 18:36:30,830 [WARNING] google_genai._api_client: Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.
+2026-09-29 18:36:31,564 [INFO] R2_MAIN: API Agenta gotowe na port 8022. Oczekuję na komendy Orkiestratora...
+2026-09-29 18:36:31,568 [INFO] R2_MAIN: Monitor magazynu wystartował w tle (skanuje co 15s).
+2026-09-29 18:40:02,895 [INFO] R2_MAIN: SZEF (Orkiestrator): Dokup 10 kg mąki
+2026-09-29 18:40:08,924 [INFO] google_genai._api_client: Retrying google.genai._api_client.BaseApiClient._async_request_once in 1.7 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
+2026-09-29 18:40:36,966 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:40:36,967 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:40:36,971 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=3d37f61e79844f0f9514c8b4dff14ddf "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:36,971 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=0d3a7075d48c4c7392a119dc44d521a9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:36,974 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=3d37f61e79844f0f9514c8b4dff14ddf "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:36,975 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=0d3a7075d48c4c7392a119dc44d521a9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:36,975 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=3d37f61e79844f0f9514c8b4dff14ddf "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:36,977 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=0d3a7075d48c4c7392a119dc44d521a9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:36,979 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=3d37f61e79844f0f9514c8b4dff14ddf "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:37,325 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=0d3a7075d48c4c7392a119dc44d521a9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:40:41,080 [INFO] google_genai._api_client: Retrying google.genai._api_client.BaseApiClient._async_request_once in 1.64 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
+2026-09-29 18:40:43,653 [INFO] google_genai._api_client: Retrying google.genai._api_client.BaseApiClient._async_request_once in 2.82 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
+2026-09-29 18:40:47,553 [INFO] google_genai._api_client: Retrying google.genai._api_client.BaseApiClient._async_request_once in 4.31 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
+2026-09-29 18:40:54,880 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:40:54,880 [INFO] R2_MAIN: AGENT:
+Niestety, żadna z naszych hurtowni nie posiada obecnie 10 kg mąki na stanie. Nie mogę zrealizować tego zakupu.
+2026-09-29 18:43:48,175 [INFO] R2_MAIN: SZEF (Orkiestrator): Dokup 10 kg mąki
+2026-09-29 18:44:04,784 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:44:04,784 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:44:04,788 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=f61a508904314fd8bb72df8448b4eabb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,788 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=04a635ccb3b946bd83efe8c6a69600e9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,790 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=f61a508904314fd8bb72df8448b4eabb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,791 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=04a635ccb3b946bd83efe8c6a69600e9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,792 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=f61a508904314fd8bb72df8448b4eabb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,793 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=04a635ccb3b946bd83efe8c6a69600e9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,795 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=f61a508904314fd8bb72df8448b4eabb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:04,799 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=04a635ccb3b946bd83efe8c6a69600e9 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:09,809 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:44:09,809 [INFO] R2_MAIN: AGENT:
+Niestety, żadna z naszych hurtowni nie posiada obecnie 10 kg mąki na stanie. Nie mogę zrealizować tego zakupu.
+2026-09-29 18:44:21,253 [INFO] R2_MAIN: SZEF (Orkiestrator): Kup 10 mąki
+2026-09-29 18:44:34,926 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:44:34,927 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:44:34,931 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64098d61dc7a4615a65f05d5123aa2cb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,931 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=19705a7548b94d7b92a7e00326979635 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,934 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64098d61dc7a4615a65f05d5123aa2cb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,934 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=19705a7548b94d7b92a7e00326979635 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,936 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64098d61dc7a4615a65f05d5123aa2cb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,936 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=19705a7548b94d7b92a7e00326979635 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,939 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=64098d61dc7a4615a65f05d5123aa2cb "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:34,942 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=19705a7548b94d7b92a7e00326979635 "HTTP/1.1 202 Accepted"
+2026-09-29 18:44:36,752 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:44:36,752 [INFO] R2_MAIN: AGENT:
+Niestety, żadna z naszych hurtowni nie posiada obecnie 10 jednostek mąki na stanie. Nie mogę zrealizować tego zakupu.
+2026-09-29 18:44:43,265 [INFO] R2_MAIN: SZEF (Orkiestrator): Buy 10 flour
+2026-09-29 18:44:53,356 [INFO] R2_MAIN: AGENT:
+Mamy już 31 kg mąki na stanie. Czy chcesz dokupić 10 kg jako dodatek, czy tylko dobić do jakiejś konkretnej wartości?
+2026-09-29 18:44:59,811 [INFO] R2_MAIN: SZEF (Orkiestrator): Dokup
+2026-09-29 18:45:05,846 [INFO] R2_MAIN: AGENT:
+O jaki produkt chodzi?
+2026-09-29 18:45:17,329 [INFO] R2_MAIN: SZEF (Orkiestrator): Dokup 10 mąki
+2026-09-29 18:45:25,886 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:45:25,887 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:45:25,890 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=d46d49f794d147448e7d9c8047dbff7b "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,891 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=cdec9d3c2c814e2cbde86d68b2afbe3f "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,893 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=d46d49f794d147448e7d9c8047dbff7b "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,894 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=cdec9d3c2c814e2cbde86d68b2afbe3f "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,897 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=d46d49f794d147448e7d9c8047dbff7b "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,897 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=cdec9d3c2c814e2cbde86d68b2afbe3f "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,900 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=d46d49f794d147448e7d9c8047dbff7b "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:25,903 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=cdec9d3c2c814e2cbde86d68b2afbe3f "HTTP/1.1 202 Accepted"
+2026-09-29 18:45:33,476 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:45:33,476 [INFO] R2_MAIN: AGENT:
+Żadna z naszych hurtowni nie posiada obecnie 10 jednostek mąki na stanie. Proces zakupowy został przerwany.
+2026-09-29 18:46:34,395 [INFO] R2_MAIN: SZEF (Orkiestrator): A ile posiada?
+2026-09-29 18:46:48,633 [INFO] R2_MAIN: AGENT:
+O jaki produkt chodzi?
+2026-09-29 18:47:09,114 [INFO] R2_MAIN: SZEF (Orkiestrator): Ile hurtownie posiadają mąki?
+2026-09-29 18:47:10,803 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:47:10,804 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:47:10,809 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=ea898b5fc6eb4a259cc5855a5b622442 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,810 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=864f6b673ac64d8483089ec227f876c8 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,813 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=ea898b5fc6eb4a259cc5855a5b622442 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,814 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=864f6b673ac64d8483089ec227f876c8 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,815 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=ea898b5fc6eb4a259cc5855a5b622442 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,816 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=864f6b673ac64d8483089ec227f876c8 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,818 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=ea898b5fc6eb4a259cc5855a5b622442 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:10,821 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=864f6b673ac64d8483089ec227f876c8 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:14,151 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:47:14,151 [INFO] R2_MAIN: AGENT:
+Żadna z naszych hurtowni nie posiada obecnie mąki na stanie.
+2026-09-29 18:47:34,902 [INFO] R2_MAIN: SZEF (Orkiestrator): How much flour does warehouses have?
+2026-09-29 18:47:41,949 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:47:41,949 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:47:41,952 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=9b13776c46724f8e884825e26aac37a4 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,953 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=20d4fd611a51449bae608d86e90d06a3 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,956 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=9b13776c46724f8e884825e26aac37a4 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,956 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=20d4fd611a51449bae608d86e90d06a3 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,958 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=9b13776c46724f8e884825e26aac37a4 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,958 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=20d4fd611a51449bae608d86e90d06a3 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,960 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=9b13776c46724f8e884825e26aac37a4 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:41,963 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=20d4fd611a51449bae608d86e90d06a3 "HTTP/1.1 202 Accepted"
+2026-09-29 18:47:55,915 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:47:55,915 [INFO] R2_MAIN: AGENT:
+Żadna z naszych hurtowni nie posiada obecnie mąki na stanie.
+2026-09-29 18:54:11,217 [INFO] R2_MAIN: SZEF (Orkiestrator): Zamów 10kg mąki
+2026-09-29 18:54:17,547 [INFO] google_genai._api_client: Retrying google.genai._api_client.BaseApiClient._async_request_once in 1.37 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
+2026-09-29 18:54:20,727 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8004/mcp/sse "HTTP/1.1 200 OK"
+2026-09-29 18:54:20,728 [INFO] httpx2: HTTP Request: GET http://127.0.0.1:8005/sse "HTTP/1.1 200 OK"
+2026-09-29 18:54:20,731 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=58c7c6b4e3e7440f80d9a931000458bb "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,732 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=38345e49d42747a9a1f0adc1be12ef88 "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,734 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=58c7c6b4e3e7440f80d9a931000458bb "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,734 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=38345e49d42747a9a1f0adc1be12ef88 "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,736 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=58c7c6b4e3e7440f80d9a931000458bb "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,736 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=38345e49d42747a9a1f0adc1be12ef88 "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,738 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8004/mcp/messages/?session_id=58c7c6b4e3e7440f80d9a931000458bb "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:20,741 [INFO] httpx2: HTTP Request: POST http://127.0.0.1:8005/messages/?session_id=38345e49d42747a9a1f0adc1be12ef88 "HTTP/1.1 202 Accepted"
+2026-09-29 18:54:22,282 [INFO] R2_MAIN: [SYSTEM]: Zadanie zakończone. Wątek zresetowany.
+2026-09-29 18:54:22,282 [INFO] R2_MAIN: AGENT:
+Niestety, żadna z naszych hurtowni nie posiada obecnie 10 kg mąki na stanie. Nie mogę zrealizować tego zamówienia.

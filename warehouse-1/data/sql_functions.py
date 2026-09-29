@@ -4,9 +4,27 @@ from typing import Optional, List, Dict, Any
 
 db_path = Path(__file__).resolve().parent/ "warehouse1.db"
 
+_schema_checked = False
+
+def ensure_db_schema(conn: sqlite3.Connection):
+    """Zapewnia, że w tabeli products istnieje kolumna min_threshold."""
+    global _schema_checked
+    if _schema_checked:
+        return
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+    if cursor.fetchone():
+        cursor.execute("PRAGMA table_info(products)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "min_threshold" not in columns:
+            cursor.execute("ALTER TABLE products ADD COLUMN min_threshold REAL NOT NULL DEFAULT 20.0")
+            conn.commit()
+    _schema_checked = True
+
 def get_connection():
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    ensure_db_schema(conn)
     return conn
 
 def init_db(products: List[Dict[str, Any]]):
@@ -22,6 +40,12 @@ def init_db(products: List[Dict[str, Any]]):
                 min_threshold REAL NOT NULL DEFAULT 20.0
             )
         """)
+        # Weryfikacja i migracja kolumny min_threshold w istniejącej tabeli
+        cursor.execute("PRAGMA table_info(products)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "min_threshold" not in columns:
+            cursor.execute("ALTER TABLE products ADD COLUMN min_threshold REAL NOT NULL DEFAULT 20.0")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS account (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -42,16 +66,22 @@ def init_db(products: List[Dict[str, Any]]):
         cursor.execute("INSERT OR IGNORE INTO account (id, balance) VALUES (1, 10000.0)")
         
         for p in products:
+            clean_name = p['name'].lower().strip()
+            threshold = p.get('min_threshold', 20.0)
             cursor.execute("""
                 INSERT OR IGNORE INTO products (name, quantity, unit, price, min_threshold)
                 VALUES (?, ?, ?, ?, ?)
             """, (
-                p['name'].lower().strip(), 
+                clean_name, 
                 p['quantity'], 
                 p.get('unit', 'pcs'), 
                 p['price'], 
-                p.get('min_threshold', 20.0)  # minimalny próg dla produktów na stanie, domyślnie 20
+                threshold
             ))
+            # Aktualizacja min_threshold dla produktów już istniejących w bazie
+            cursor.execute("""
+                UPDATE products SET min_threshold = ? WHERE LOWER(TRIM(name)) = ?
+            """, (threshold, clean_name))
         conn.commit()
 
 def db_get_product(item_name: str):

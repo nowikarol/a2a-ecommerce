@@ -80,7 +80,7 @@ log_file_offsets: Dict[str, int] = {}
 recent_event_timestamps: Dict[str, float] = {}
 
 
-async def broadcast_event(event: Dict[str, Any]):
+async def broadcast_event(event: Dict[str, Any], bypass_dedup: bool = False):
     """Broadcasts a supply-chain packet event to all connected WebSocket clients."""
     src = event.get('source') or ''
     tgt = event.get('target') or ''
@@ -89,13 +89,24 @@ async def broadcast_event(event: Dict[str, Any]):
     item_name = str(item_info.get('name') or '').lower().strip()
     qty = str(item_info.get('quantity') or '')
     sig = f"{src}->{tgt}:{mtype}:{item_name}:{qty}"
-    
+    deliv_sig = f"{src}->{tgt}:DELIVERY"
+
     now_ts = time.time()
-    # Deduplicate exact duplicate packets arriving within 3.5 seconds
-    if sig in recent_event_timestamps and (now_ts - recent_event_timestamps[sig]) < 3.5:
-        logger.info(f"[DEDUP IGNORED] Skipping duplicate event packet: {sig}")
-        return
+    # Deduplicate packets arriving within time window unless bypassed
+    if not bypass_dedup:
+        # Never allow duplicate DELIVERY between same source and target within 3.5 seconds
+        if mtype == "DELIVERY":
+            if deliv_sig in recent_event_timestamps and (now_ts - recent_event_timestamps[deliv_sig]) < 3.5:
+                logger.info(f"[DEDUP IGNORED] Skipping duplicate DELIVERY packet: {deliv_sig}")
+                return
+        if sig in recent_event_timestamps and (now_ts - recent_event_timestamps[sig]) < 2.5:
+            logger.info(f"[DEDUP IGNORED] Skipping duplicate event packet: {sig}")
+            return
+
+    # Always register timestamps (even when bypass_dedup=True) to prevent subsequent poller duplicates
     recent_event_timestamps[sig] = now_ts
+    if mtype == "DELIVERY":
+        recent_event_timestamps[deliv_sig] = now_ts
     
     # Store event in history
     event["id"] = f"evt-{int(now_ts * 1000)}"
@@ -110,7 +121,7 @@ async def broadcast_event(event: Dict[str, Any]):
 
     dead_connections = []
     payload = json.dumps({"type": "packet", "data": event})
-    for ws in active_connections:
+    for ws in list(active_connections):
         try:
             await ws.send_text(payload)
         except Exception:
@@ -121,11 +132,56 @@ async def broadcast_event(event: Dict[str, Any]):
             active_connections.remove(dead)
 
 
+is_scenario_running: bool = False
+last_scenario_end_time: float = 0.0
+
+
+async def broadcast_scenario_start(scenario_id: int, title: str, description: str):
+    """Broadcasts the beginning of a trading demonstration scenario."""
+    global is_scenario_running
+    is_scenario_running = True
+    payload = json.dumps({
+        "type": "scenario_start",
+        "data": {
+            "scenario_id": scenario_id,
+            "title": title,
+            "description": description,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
+        }
+    })
+    for ws in list(active_connections):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            pass
+
+
+async def broadcast_scenario_end(scenario_id: int, title: str, summary: str):
+    """Broadcasts the successful completion of a trading demonstration scenario."""
+    global is_scenario_running, last_scenario_end_time
+    is_scenario_running = False
+    last_scenario_end_time = time.time()
+    payload = json.dumps({
+        "type": "scenario_end",
+        "data": {
+            "scenario_id": scenario_id,
+            "title": title,
+            "summary": summary,
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
+        }
+    })
+    for ws in list(active_connections):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            pass
+
+
 async def broadcast_node_state(node_data: Dict[str, Any]):
     """Broadcasts updated node state (balances, stock, health) to clients."""
     payload = json.dumps({"type": "node_state", "data": node_data})
     dead = []
-    for ws in active_connections:
+    for ws in list(active_connections):
         try:
             await ws.send_text(payload)
         except Exception:
@@ -266,6 +322,7 @@ async def poll_databases_loop():
     while True:
         try:
             await asyncio.sleep(1.2)
+            scenario_active = is_scenario_running or ((time.time() - last_scenario_end_time) < 3.0)
 
             # Check P1 sales
             p1_db = DB_PATHS["P1"]
@@ -278,21 +335,22 @@ async def poll_databases_loop():
                     for r in rows:
                         last_seen_db_ids["P1"] = max(last_seen_db_ids["P1"], r[0])
                         buyer = r[5] or "H1"
-                        await broadcast_event({
-                            "source": "P1",
-                            "target": buyer,
-                            "message_type": "DELIVERY",
-                            "summary": f"Dostawa P1 -> {buyer}: {r[2]}x {r[1]} ({r[4]} PLN)",
-                            "item": {"name": r[1], "quantity": r[2], "price": r[3]},
-                            "total_cost": r[4],
-                            "raw_json": {
-                                "sender_id": "P1",
-                                "receiver_id": buyer,
+                        if not scenario_active:
+                            await broadcast_event({
+                                "source": "P1",
+                                "target": buyer,
                                 "message_type": "DELIVERY",
+                                "summary": f"Dostawa P1 -> {buyer}: {r[2]}x {r[1]} ({r[4]} PLN)",
                                 "item": {"name": r[1], "quantity": r[2], "price": r[3]},
                                 "total_cost": r[4],
-                            },
-                        })
+                                "raw_json": {
+                                    "sender_id": "P1",
+                                    "receiver_id": buyer,
+                                    "message_type": "DELIVERY",
+                                    "item": {"name": r[1], "quantity": r[2], "price": r[3]},
+                                    "total_cost": r[4],
+                                },
+                            })
 
             # Check R2 deliveries
             r2_db = DB_PATHS["R2"]
@@ -305,7 +363,7 @@ async def poll_databases_loop():
                     for r in rows:
                         last_seen_db_ids["R2"] = max(last_seen_db_ids["R2"], r[0])
                         seller = r[2] or "H1"
-                        if "DOSTAWA" in (r[1] or ""):
+                        if "DOSTAWA" in (r[1] or "") and not scenario_active:
                             await broadcast_event({
                                 "source": seller,
                                 "target": "R2",
@@ -320,6 +378,85 @@ async def poll_databases_loop():
                                     "item": {"name": r[3], "quantity": r[4]},
                                     "total_cost": r[5],
                                 },
+                            })
+
+            # Check R1 purchases
+            r1_db = DB_PATHS["R1"]
+            if r1_db.exists():
+                with sqlite3.connect(r1_db, timeout=1.0) as conn:
+                    rows = conn.execute(
+                        "SELECT id, account_id, transaction_type, amount, currency, description FROM transactions WHERE id > ? ORDER BY id ASC",
+                        (last_seen_db_ids["R1"],),
+                    ).fetchall()
+                    for r in rows:
+                        last_seen_db_ids["R1"] = max(last_seen_db_ids["R1"], r[0])
+                        desc = r[5] or ""
+                        seller = "H1"
+                        if "H2" in desc or "Hurtownia 2" in desc:
+                            seller = "H2"
+                        if not scenario_active:
+                            m_desc = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|x)?\s*([a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]+)", desc)
+                            item_name = m_desc.group(2) if m_desc else "towar"
+                            item_qty = float(m_desc.group(1)) if m_desc else 1.0
+                            await broadcast_event({
+                                "source": seller,
+                                "target": "R1",
+                                "message_type": "DELIVERY",
+                                "step": 5,
+                                "step_title": "Dostawa i Rozliczenie (Zewnętrzny Zakup)",
+                                "summary": f"Zakup R1: {desc} ({r[3]} PLN)",
+                                "narrative": f"Wykryto nową transakcję w bazie danych Restauracji R1: {desc} ({r[3]} PLN). Magazyn i portfel zostały zaktualizowane.",
+                                "rule": "Automatyczna synchronizacja: Nakładka na bieżąco monitoruje bazy SQLite i natychmiast wizualizuje zakupy uruchomione z terminala.",
+                                "item": {"name": item_name, "quantity": item_qty},
+                                "total_cost": r[3],
+                                "raw_json": {
+                                    "source": seller,
+                                    "target": "R1",
+                                    "message_type": "DELIVERY",
+                                    "amount": r[3],
+                                    "currency": r[4],
+                                    "description": desc,
+                                    "item": {"name": item_name, "quantity": item_qty},
+                                }
+                            })
+
+            # Check H1 sales & purchases
+            h1_db = DB_PATHS["H1"]
+            if h1_db.exists():
+                with sqlite3.connect(h1_db, timeout=1.0) as conn:
+                    rows = conn.execute(
+                        "SELECT id, partner, type, item_name, quantity, total_cost FROM transactions WHERE id > ? ORDER BY id ASC",
+                        (last_seen_db_ids["H1"],),
+                    ).fetchall()
+                    for r in rows:
+                        last_seen_db_ids["H1"] = max(last_seen_db_ids["H1"], r[0])
+                        partner = r[1] or ""
+                        tx_type = r[2] or ""
+                        if tx_type == "PURCHASE":
+                            src, tgt = "P1", "H1"
+                        else:
+                            src = "H1"
+                            tgt = "R1" if ("R1" in partner or "1" in partner) else "R2"
+                        if not scenario_active:
+                            await broadcast_event({
+                                "source": src,
+                                "target": tgt,
+                                "message_type": "DELIVERY",
+                                "step": 5,
+                                "step_title": "Dostawa i Rozliczenie (Zewnętrzny Zakup)",
+                                "summary": f"Transakcja H1 ({tx_type}): {r[4]}x {r[3]} ({r[5]} PLN)",
+                                "narrative": f"Wykryto nową transakcję w bazie Hurtowni H1: {tx_type} {r[4]}x {r[3]} ({r[5]} PLN) z {partner}.",
+                                "rule": "Automatyczna synchronizacja: Aktualizacja w bazie SQLite Hurtowni H1.",
+                                "item": {"name": r[3], "quantity": r[4]},
+                                "total_cost": r[5],
+                                "raw_json": {
+                                    "source": src,
+                                    "target": tgt,
+                                    "message_type": "DELIVERY",
+                                    "item": {"name": r[3], "quantity": r[4]},
+                                    "total_cost": r[5],
+                                    "type": tx_type
+                                }
                             })
 
             # Send updated node state
@@ -337,10 +474,14 @@ async def poll_databases_loop():
 # =============================================================================
 
 def find_task_logs() -> List[Path]:
-    """Dynamically finds all task log files in antigravity tasks folder."""
+    """Dynamically finds all task log files in antigravity and local workspace."""
     user_home = Path(os.path.expanduser("~"))
     pattern = str(user_home / ".gemini" / "antigravity" / "brain" / "*" / ".system_generated" / "tasks" / "*.log")
     files = [Path(p) for p in glob.glob(pattern)]
+    # Also include any local .log in the workspace
+    for p in BASE_DIR.glob("**/*.log"):
+        if "overlay" not in str(p) and p.is_file():
+            files.append(p)
     return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
@@ -721,24 +862,53 @@ async def api_trigger_chat(req: ChatPromptRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Global state for Human-in-the-Loop authorization
+active_hitl_event: Optional[asyncio.Event] = None
+hitl_decision: Optional[str] = None
+
+
+class HitlDecisionRequest(BaseModel):
+    decision: str = "approve"  # "approve" or "reject"
+
+
+@app.post("/api/simulate/hitl-confirm")
+async def api_simulate_hitl_confirm(req: HitlDecisionRequest):
+    """Processes operator's approval or rejection for Human-in-the-Loop scenario."""
+    global hitl_decision, active_hitl_event
+    hitl_decision = req.decision
+    if active_hitl_event and not active_hitl_event.is_set():
+        active_hitl_event.set()
+    logger.info(f"[HITL CONFIRM] Operator decision: {req.decision}")
+    return {"status": "success", "decision": req.decision}
+
+
+@app.post("/api/simulate/reset")
+async def api_simulate_reset():
+    """Resets visual history and refreshes node states."""
+    event_history.clear()
+    recent_signatures.clear()
+    recent_event_timestamps.clear()
+    state = get_node_details()
+    await broadcast_node_state(state)
+    return {"status": "reset", "state": state}
+
+
 @app.post("/api/simulate/demo-flow")
 async def api_simulate_demo_flow():
     """
-    KROK PO KROKU ZGODNIE ZE SPECYFIKACJĄ PROTOKOŁU (docs/PROTOCOL_SPECIFICATION.md):
-    Ścieżka A: Sukces (Kupujący R1 -> Sprzedający H1 i H2)
-    1. Kupujący R1 -> Sprzedający H1, H2: check_availability (AVAILABILITY_REQUEST)
-    2. Sprzedający H1, H2 -> Kupujący R1: availability-response (AVAILABILITY_RESPONSE)
-    3. Kupujący R1 -> Sprzedający H1, H2: request_offer (CALL_FOR_PROPOSAL)
-    4. Sprzedający H1, H2 -> Kupujący R1: response-offer (PROPOSAL, H1: 3.50 PLN/kg, H2: 4.00 PLN/kg)
-    5. Kupujący R1 ocenia oferty wg reguły min(total_cost) -> wybór H1 (17.50 PLN).
-    6. Kupujący R1 -> Sprzedający H1: accept_offer (ACCEPT_PROPOSAL).
-       Sprzedający H1 weryfikuje stan i odpowiada: H1 -> R1: accept-offer (ACCEPT_PROPOSAL).
-       ZASADA MILCZENIA: Oferta H2 milcząco wygasa, brak jakichkolwiek komunikatów do H2.
-    7. Sprzedający H1 bilansuje bazę i realizuje dostawę: H1 -> R1: receive_delivery (DELIVERY).
-       Kupujący R1 bilansuje portfel i magazyn.
+    SCENARIUSZ 1: STANDARDOWY CYKL HANDLU (CNP) - ŚCIEŻKA SUKCESU
+    Restauracja R1 (Kupujący) -> Hurtownie H1 i H2 (Sprzedawcy)
+    Weryfikacja dostępności, oferty, wybór najtańszego (H1), milczenie wobec H2, dostawa i rozliczenie ACID.
     """
     async def run_demo():
-        # Zapewnienie minimalnego budżetu i stanu w bazach SQLite
+        await broadcast_scenario_start(
+            1,
+            "Scenariusz 1: Standardowy Cykl Handlu (CNP)",
+            "Restauracja R1 potrzebuje 5 kg mąki do wypieku pizzy. Sonduje rynek u dwóch hurtowni (H1 i H2), wybiera najtańszą ofertę, zawiera kontrakt i odbiera dostawę."
+        )
+        await asyncio.sleep(1.0)
+
+        # Baseline check
         try:
             if DB_PATHS["R1"].exists():
                 with sqlite3.connect(DB_PATHS["R1"], timeout=2.0) as conn:
@@ -753,592 +923,652 @@ async def api_simulate_demo_flow():
         except Exception as e:
             logger.warning(f"Error ensuring baseline for demo: {e}")
 
-        # Pobranie rzeczywistego stanu z bazy
-        h1_stock_qty = 50.0
-        h2_stock_qty = 45.0
-        try:
-            if DB_PATHS["H1"].exists():
-                with sqlite3.connect(DB_PATHS["H1"], timeout=1.0) as conn:
-                    row = conn.execute("SELECT quantity FROM products WHERE name = 'flour'").fetchone()
-                    if row:
-                        h1_stock_qty = float(row[0])
-            if DB_PATHS["H2"].exists():
-                with sqlite3.connect(DB_PATHS["H2"], timeout=1.0) as conn:
-                    row = conn.execute("SELECT quantity FROM warehouse2 WHERE LOWER(name) = 'flour'").fetchone()
-                    if row:
-                        h2_stock_qty = float(row[0])
-        except Exception:
-            pass
-
-        # KROK 1: Weryfikacja Dostępności Towaru (Kupujący -> Sprzedający A, B)
+        # KROK 1: Weryfikacja Dostępności Towaru
         await broadcast_event({
+            "scenario_id": 1,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "R1",
             "target": "H1",
             "message_type": "AVAILABILITY_REQUEST",
-            "summary": "Krok 1: check_availability(flour, 5 kg) -> H1",
+            "summary": "Krok 1: Zapytanie o dostępność 5 kg mąki -> Hurtownia H1",
+            "narrative": "Restauracja R1 sonduje rynek hurtowy i weryfikuje, czy Hurtownia H1 posiada na magazynie co najmniej 5 kg mąki pszennej.",
+            "rule": "Zasada CNP Krok 1: Przed rozpoczęciem negocjacji cenowej kupujący sprawdza fizyczną obecność towaru, odrzucając sprzedawców bez zapasów.",
             "item": {"name": "flour", "quantity": 5.0},
-            "raw_json": {
-                "sender_id": "R1",
-                "receiver_id": "H1",
-                "message_type": "AVAILABILITY_REQUEST",
-                "item": {"name": "flour", "quantity": 5.0}
-            }
-        })
+            "raw_json": {"sender_id": "R1", "receiver_id": "H1", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "flour", "quantity": 5.0}}
+        }, bypass_dedup=True)
+
         await broadcast_event({
+            "scenario_id": 1,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "R1",
             "target": "H2",
             "message_type": "AVAILABILITY_REQUEST",
-            "summary": "Krok 1: check_availability(flour, 5 kg) -> H2",
+            "summary": "Krok 1: Zapytanie o dostępność 5 kg mąki -> Hurtownia H2",
+            "narrative": "Restauracja R1 równolegle weryfikuje dostępność tego samego surowca u alternatywnego dostawcy – Hurtowni H2.",
+            "rule": "Konkurencja rynkowa: Zapytania są rozsyłane równolegle, aby uzyskać optymalne warunki zakupu.",
             "item": {"name": "flour", "quantity": 5.0},
-            "raw_json": {
-                "sender_id": "R1",
-                "receiver_id": "H2",
-                "message_type": "AVAILABILITY_REQUEST",
-                "item": {"name": "flour", "quantity": 5.0}
-            }
-        })
-        await asyncio.sleep(1.8)
-
-        # KROK 1: Odpowiedź sprzedawców o dostępności
-        await broadcast_event({
-            "source": "H1",
-            "target": "R1",
-            "message_type": "AVAILABILITY_RESPONSE",
-            "summary": f"Krok 1: availability-response (is_available: true, stan: {int(h1_stock_qty)} kg)",
-            "item": {"name": "flour", "quantity": 5.0},
-            "is_available": True,
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "R1",
-                "message_type": "AVAILABILITY_RESPONSE",
-                "item": {"name": "flour", "quantity": 5.0},
-                "is_available": True,
-                "available_quantity": h1_stock_qty
-            }
-        })
-        await broadcast_event({
-            "source": "H2",
-            "target": "R1",
-            "message_type": "AVAILABILITY_RESPONSE",
-            "summary": f"Krok 1: availability-response (is_available: true, stan: {int(h2_stock_qty)} kg)",
-            "item": {"name": "flour", "quantity": 5.0},
-            "is_available": True,
-            "raw_json": {
-                "sender_id": "H2",
-                "receiver_id": "R1",
-                "message_type": "AVAILABILITY_RESPONSE",
-                "item": {"name": "flour", "quantity": 5.0},
-                "is_available": True,
-                "available_quantity": h2_stock_qty
-            }
-        })
-        await asyncio.sleep(1.8)
-
-        # KROK 2: Pobranie Ofert Cenowych (tylko od dostępnych)
-        await broadcast_event({
-            "source": "R1",
-            "target": "H1",
-            "message_type": "CALL_FOR_PROPOSAL",
-            "summary": "Krok 2: request_offer(flour, 5 kg) -> H1",
-            "item": {"name": "flour", "quantity": 5.0},
-            "raw_json": {
-                "sender_id": "R1",
-                "receiver_id": "H1",
-                "message_type": "CALL_FOR_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0}
-            }
-        })
-        await broadcast_event({
-            "source": "R1",
-            "target": "H2",
-            "message_type": "CALL_FOR_PROPOSAL",
-            "summary": "Krok 2: request_offer(flour, 5 kg) -> H2",
-            "item": {"name": "flour", "quantity": 5.0},
-            "raw_json": {
-                "sender_id": "R1",
-                "receiver_id": "H2",
-                "message_type": "CALL_FOR_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0}
-            }
-        })
-        await asyncio.sleep(1.8)
-
-        # KROK 2: Sprzedawcy składają oferty cenowe (PROPOSAL)
-        await broadcast_event({
-            "source": "H1",
-            "target": "R1",
-            "message_type": "PROPOSAL",
-            "summary": "Krok 2: response-offer od H1: 3.50 PLN/kg (Razem: 17.50 PLN)",
-            "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
-            "total_cost": 17.50,
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "R1",
-                "message_type": "PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
-                "total_cost": 17.50
-            }
-        })
-        await broadcast_event({
-            "source": "H2",
-            "target": "R1",
-            "message_type": "PROPOSAL",
-            "summary": "Krok 2: response-offer od H2: 4.00 PLN/kg (Razem: 20.00 PLN)",
-            "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
-            "total_cost": 20.00,
-            "raw_json": {
-                "sender_id": "H2",
-                "receiver_id": "R1",
-                "message_type": "PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
-                "total_cost": 20.00
-            }
-        })
+            "raw_json": {"sender_id": "R1", "receiver_id": "H2", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "flour", "quantity": 5.0}}
+        }, bypass_dedup=True)
         await asyncio.sleep(2.0)
 
-        # KROK 3 & 4: Kupujący wybiera min(total_cost) -> H1.
-        # Kupujący wywołuje accept_offer u H1 (ACCEPT_PROPOSAL).
-        # UWAGA: Zasada milczenia wobec H2 (brak wiadomości do H2, oferta milcząco wygasa).
+        # KROK 1b: Odpowiedź sprzedawców o dostępności
         await broadcast_event({
+            "scenario_id": 1,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
+            "source": "H1",
+            "target": "R1",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 1: Hurtownia H1 potwierdza dostępność towaru (is_available: true)",
+            "narrative": "Hurtownia H1 weryfikuje bazę danych i potwierdza: towar jest dostępny od ręki w wystarczającej ilości.",
+            "rule": "Filtracja oferentów: Pozytywna odpowiedź kwalifikuje Hurtownię H1 do drugiego etapu (składania ofert cenowych).",
+            "item": {"name": "flour", "quantity": 5.0},
+            "is_available": True,
+            "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "AVAILABILITY_RESPONSE", "item": {"name": "flour", "quantity": 5.0}, "is_available": True}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
+            "source": "H2",
+            "target": "R1",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 1: Hurtownia H2 potwierdza dostępność towaru (is_available: true)",
+            "narrative": "Hurtownia H2 również weryfikuje bazę SQLite i deklaruje gotowość do realizacji zamówienia.",
+            "rule": "Obaj dostawcy zakwalifikowani: Kupujący R1 przechodzi do zbierania ofert cenowych od obu partnerów.",
+            "item": {"name": "flour", "quantity": 5.0},
+            "is_available": True,
+            "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "AVAILABILITY_RESPONSE", "item": {"name": "flour", "quantity": 5.0}, "is_available": True}
+        }, bypass_dedup=True)
+        await asyncio.sleep(2.0)
+
+        # KROK 2: Zbieranie Ofert Cenowych (CFP)
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "R1",
+            "target": "H1",
+            "message_type": "CALL_FOR_PROPOSAL",
+            "summary": "Krok 2: Zaproszenie do złożenia oferty cenowej (CFP) -> H1",
+            "narrative": "Restauracja R1 składa formalne zapytanie ofertowe (CALL_FOR_PROPOSAL) o wycenę 5 kg mąki do Hurtowni H1.",
+            "rule": "Zasada CNP Krok 2: Zapytanie ofertowe jest kierowane wyłącznie do zweryfikowanych wcześniej sprzedawców.",
+            "item": {"name": "flour", "quantity": 5.0},
+            "raw_json": {"sender_id": "R1", "receiver_id": "H1", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "flour", "quantity": 5.0}}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "R1",
+            "target": "H2",
+            "message_type": "CALL_FOR_PROPOSAL",
+            "summary": "Krok 2: Zaproszenie do złożenia oferty cenowej (CFP) -> H2",
+            "narrative": "Restauracja R1 jednocześnie składa analogiczne zapytanie ofertowe do Hurtowni H2.",
+            "rule": "Standaryzacja zapytań: Oba zapytania mają identyczną specyfikację wolumenu i surowca.",
+            "item": {"name": "flour", "quantity": 5.0},
+            "raw_json": {"sender_id": "R1", "receiver_id": "H2", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "flour", "quantity": 5.0}}
+        }, bypass_dedup=True)
+        await asyncio.sleep(2.0)
+
+        # KROK 2b: Oferty sprzedawców (PROPOSAL)
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "H1",
+            "target": "R1",
+            "message_type": "PROPOSAL",
+            "summary": "Krok 2: Oferta H1: 3.50 PLN/kg (Łącznie: 17.50 PLN)",
+            "narrative": "Hurtownia H1 przedstawia wiążącą ofertę: cena jednostkowa wynosi 3.50 PLN/kg, całkowity koszt to 17.50 PLN.",
+            "rule": "Wiążący charakter oferty: Sprzedawca gwarantuje podaną cenę na czas trwania procedury przetargowej.",
+            "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
+            "total_cost": 17.50,
+            "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 3.50}, "total_cost": 17.50}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "H2",
+            "target": "R1",
+            "message_type": "PROPOSAL",
+            "summary": "Krok 2: Oferta H2: 4.00 PLN/kg (Łącznie: 20.00 PLN)",
+            "narrative": "Hurtownia H2 składa ofertę konkurencyjną: cena 4.00 PLN/kg, całkowity koszt wynosi 20.00 PLN.",
+            "rule": "Kompletność ofert: Kupujący zebrał komplet ofert i przystępuje do ich automatycznej analizy.",
+            "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
+            "total_cost": 20.00,
+            "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 4.00}, "total_cost": 20.00}
+        }, bypass_dedup=True)
+        await asyncio.sleep(2.0)
+
+        # KROK 3: Wybór Najlepszej Oferty
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 3,
+            "step_title": "Wybór Najlepszej Oferty",
+            "source": "R1",
+            "target": "R1",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 3: Analiza ofert -> Wybór Hurtowni H1 (17.50 PLN vs 20.00 PLN)",
+            "narrative": "Restauracja R1 stosuje algorytm min(total_cost). Oferta H1 (17.50 PLN) jest o 2.50 PLN tańsza od H2. Wobec H2 zastosowano zasadę milczenia.",
+            "rule": "Zasada Milczenia (Silence Rule): Zgodnie z protokołem CNP, oferta przegranego (H2) po prostu wygasa. Kupujący nie generuje zbędnego ruchu w sieci.",
+            "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
+            "total_cost": 17.50,
+            "raw_json": {"action": "EVALUATE_OFFERS", "selected": "H1", "total_cost": 17.50, "ignored_silent": "H2", "savings": 2.50}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # KROK 4: Zawarcie Kontraktu (ACCEPT_PROPOSAL)
+        await broadcast_event({
+            "scenario_id": 1,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu i Rezerwacja",
             "source": "R1",
             "target": "H1",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: Wybór min(cena) -> accept_offer(H1, 17.50 PLN). Oferta H2 milcząco wygasa.",
+            "summary": "Krok 4: Kupujący akceptuje ofertę Hurtowni H1 (ACCEPT_PROPOSAL)",
+            "narrative": "Restauracja R1 przesyła oficjalną akceptację oferty do Hurtowni H1 na kwotę 17.50 PLN.",
+            "rule": "Zasada CNP Krok 4: Wiążące zamówienie. Oferta zostaje przekształcona w prawomocny kontrakt handlowy.",
             "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
             "total_cost": 17.50,
-            "raw_json": {
-                "sender_id": "R1",
-                "receiver_id": "H1",
-                "message_type": "ACCEPT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
-                "total_cost": 17.50
-            }
-        })
-        await asyncio.sleep(1.8)
+            "raw_json": {"sender_id": "R1", "receiver_id": "H1", "message_type": "ACCEPT_PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 3.50}, "total_cost": 17.50}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.5)
 
-        # KROK 4: Sprzedawca H1 weryfikuje bazę i potwierdza akceptację (Ścieżka A)
+        # KROK 4b: Sprzedawca potwierdza zamówienie
         await broadcast_event({
+            "scenario_id": 1,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu i Rezerwacja",
             "source": "H1",
             "target": "R1",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: Sprzedawca H1 potwierdza akceptację zamówienia (rezerwacja towaru)",
+            "summary": "Krok 4: Hurtownia H1 potwierdza przyjęcie zamówienia (ORDER_CONFIRMED)",
+            "narrative": "Hurtownia H1 weryfikuje bazę danych, rezerwuje 5 kg mąki i odsyła potwierdzenie przyjęcia zamówienia do Kupującego.",
+            "rule": "Dwuetapowe zatwierdzenie: Sprzedawca przed wydaniem towaru ostatecznie rezerwuje zasoby magazynowe.",
             "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
             "total_cost": 17.50,
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "R1",
-                "message_type": "ACCEPT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
-                "total_cost": 17.50,
-                "status": "ORDER_CONFIRMED"
-            }
-        })
-        await asyncio.sleep(1.5)
+            "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "ACCEPT_PROPOSAL", "status": "ORDER_CONFIRMED", "total_cost": 17.50}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
 
-        # KROK 5: Bilansowanie bazy danych w SQLite i fizyczna dostawa towaru
+        # KROK 5: Rozliczenie ACID w SQLite i Fizyczna Dostawa
         try:
-            # 1. Bilansowanie u Kupującego R1 (odejmuje saldo, dodaje mąkę, zapisuje transakcję)
             if DB_PATHS["R1"].exists():
                 with sqlite3.connect(DB_PATHS["R1"], timeout=3.0) as conn:
                     conn.execute("UPDATE financial_account SET balance = balance - 17.50, updated_at = CURRENT_TIMESTAMP WHERE account_id = 'R1_WALLET'")
                     conn.execute("UPDATE inventory SET quantity = quantity + 5 WHERE name = 'flour'")
-                    conn.execute(
+                    cur_r1 = conn.execute(
                         "INSERT INTO transactions (account_id, transaction_type, amount, currency, description) VALUES (?, ?, ?, ?, ?)",
                         ("R1_WALLET", "EXPENSE", 17.50, "PLN", "Zakup 5 kg mąki od Hurtownia 1 (CNP Sukces)")
                     )
+                    last_seen_db_ids["R1"] = max(last_seen_db_ids["R1"], cur_r1.lastrowid or 0)
                     conn.commit()
 
-            # 2. Bilansowanie u Sprzedawcy H1 (dodaje saldo, odejmuje mąkę, zapisuje transakcję)
             if DB_PATHS["H1"].exists():
                 with sqlite3.connect(DB_PATHS["H1"], timeout=3.0) as conn:
                     conn.execute("UPDATE account SET balance = balance + 17.50 WHERE id = 1")
                     conn.execute("UPDATE products SET quantity = quantity - 5 WHERE name = 'flour'")
-                    conn.execute(
+                    cur_h1 = conn.execute(
                         "INSERT INTO transactions (partner, type, item_name, quantity, total_cost) VALUES (?, ?, ?, ?, ?)",
                         ("Restauracja R1", "SALE", "flour", 5, 17.50)
                     )
+                    last_seen_db_ids["H1"] = max(last_seen_db_ids["H1"], cur_h1.lastrowid or 0)
                     conn.commit()
 
-            # Natychmiastowe odświeżenie UI
             updated_state = get_node_details()
             await broadcast_node_state(updated_state)
             logger.info("Real balance & inventory updated for CNP Success (R1, H1).")
         except Exception as e:
             logger.error(f"Error executing balance update in demo: {e}", exc_info=True)
 
-        # KROK 5: Sprzedawca H1 realizuje dostawę (receive_delivery)
+        # KROK 5: Fizyczna dostawa towaru (DELIVERY)
         await broadcast_event({
+            "scenario_id": 1,
+            "step": 5,
+            "step_title": "Rozliczenie Finansowe i Dostawa",
             "source": "H1",
             "target": "R1",
             "message_type": "DELIVERY",
-            "summary": "Krok 5: receive_delivery: H1 dostarcza 5 kg mąki do R1 (rozliczono 17.50 PLN)",
+            "summary": "Krok 5: Hurtownia H1 realizuje dostawę 5 kg mąki do R1 (DELIVERY)",
+            "narrative": "Hurtownia H1 dostarcza towar do Restauracji R1. Salda obu stron w SQLite zostały zbilansowane: R1: -17.50 PLN (+5 kg mąki), H1: +17.50 PLN (-5 kg mąki).",
+            "rule": "Spójność ACID: Płatność i zmiana stanów magazynowych dokonują się atomowo w bazach SQLite obu agentów.",
             "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
             "total_cost": 17.50,
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "R1",
-                "message_type": "DELIVERY",
-                "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
-                "total_cost": 17.50,
-                "status": "DELIVERED"
-            }
-        })
+            "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "DELIVERY", "item": {"name": "flour", "quantity": 5.0, "price": 3.50}, "total_cost": 17.50, "status": "DELIVERED"}
+        }, bypass_dedup=True)
 
         await asyncio.sleep(0.5)
         await broadcast_node_state(get_node_details())
+        await broadcast_scenario_end(1, "Scenariusz 1: Standardowy Cykl Handlu Zakończony Sukcesem", "Wszystkie 5 kroków protokołu CNP zostało zrealizowanych. Surowiec dotarł do spiżarni R1, środki przekazane do H1.")
 
     asyncio.create_task(run_demo())
-    return {"status": "started", "message": "Uruchomiono standardowy 5-etapowy proces CNP (Ścieżka Sukces)."}
+    return {"status": "started", "scenario_id": 1, "message": "Uruchomiono standardowy 5-etapowy proces CNP."}
 
 
 @app.post("/api/simulate/demo-reject-flow")
 async def api_simulate_demo_reject_flow():
     """
-    KROK PO KROKU ZGODNIE ZE SPECYFIKACJĄ PROTOKOŁU (docs/PROTOCOL_SPECIFICATION.md):
-    Ścieżka B: Towar wyprzedany w międzyczasie (Odrzucenie przez Sprzedawcę i Fallback Kupującego)
-    1. Kupujący R1 -> H1, H2: check_availability (AVAILABILITY_REQUEST)
-    2. H1, H2 -> R1: availability-response (AVAILABILITY_RESPONSE)
-    3. R1 -> H1, H2: request_offer (CALL_FOR_PROPOSAL)
-    4. H1, H2 -> R1: response-offer (PROPOSAL, H1: 3.50 PLN/kg, H2: 4.00 PLN/kg)
-    5. R1 ocenia oferty wg reguły min(total_cost) -> wybór najtańszego H1.
-    6. Kupujący R1 -> Sprzedający H1: accept_offer (ACCEPT_PROPOSAL).
-       Weryfikacja stanu przez H1: brak towaru na stanie (Race Condition / towar wyprzedany)!
-       SPRZEDAWCA H1 -> KUPUJĄCY R1: reject.json (REJECT_PROPOSAL ❌)!
-    7. FALLBACK KUPUJĄCEGO:
-       Kupujący R1 natychmiast przechodzi do kolejnej oferty z listy (H2).
-       Kupujący R1 -> Sprzedający H2: accept_offer (ACCEPT_PROPOSAL).
-       Sprzedający H2 -> Kupujący R1: accept-offer (ACCEPT_PROPOSAL 🤝).
-    8. Sprzedający H2 bilansuje bazę i realizuje dostawę: H2 -> R1: receive_delivery (DELIVERY 🚚).
-       Kupujący R1 bilansuje portfel i magazyn.
+    SCENARIUSZ 2: ODRZUCENIE PRZEZ SPRZEDAWCĘ I AUTOMATYCZNY FALLBACK
+    Hurtownia H1 odrzuca (brak towaru z powodu wyprzedania w międzyczasie) -> R1 natychmiast kupuje u H2.
     """
     async def run_reject_demo():
+        await broadcast_scenario_start(
+            2,
+            "Scenariusz 2: Odrzucenie i Automatyczny Fallback",
+            "Restauracja R1 wybiera najtańszą Hurtownię H1, lecz towar zostaje w międzyczasie wyprzedany (Race Condition). H1 odrzuca ofertę, a autonomiczny agent R1 bez zatrzymywania natychmiast zawiera kontrakt z kolejną hurtownią (H2)."
+        )
+        await asyncio.sleep(1.0)
+
         # Krok 1: Weryfikacja dostępności
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "R1",
             "target": "H1",
             "message_type": "AVAILABILITY_REQUEST",
-            "summary": "Krok 1: check_availability(flour, 5 kg) -> H1",
+            "summary": "Krok 1: Sprawdzenie dostępności 5 kg mąki w Hurtowni H1",
+            "narrative": "Restauracja R1 pyta Hurtownię H1 o dostępność 5 kg mąki.",
+            "rule": "Krok 1 CNP: Wstępna filtracja oferentów.",
             "item": {"name": "flour", "quantity": 5.0},
             "raw_json": {"sender_id": "R1", "receiver_id": "H1", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "flour", "quantity": 5.0}}
-        })
+        }, bypass_dedup=True)
+
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "R1",
             "target": "H2",
             "message_type": "AVAILABILITY_REQUEST",
-            "summary": "Krok 1: check_availability(flour, 5 kg) -> H2",
+            "summary": "Krok 1: Sprawdzenie dostępności 5 kg mąki w Hurtowni H2",
+            "narrative": "Restauracja R1 pyta Hurtownię H2 o dostępność 5 kg mąki.",
+            "rule": "Równoległe badanie rynku.",
             "item": {"name": "flour", "quantity": 5.0},
             "raw_json": {"sender_id": "R1", "receiver_id": "H2", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "flour", "quantity": 5.0}}
-        })
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
-        # Krok 1b: Odpowiedź o dostępności
+        # Krok 1b: Obie hurtownie potwierdzają
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "H1",
             "target": "R1",
             "message_type": "AVAILABILITY_RESPONSE",
-            "summary": "Krok 1: availability-response: H1 (is_available: true)",
+            "summary": "Krok 1: H1 potwierdza dostępność (w tym momencie towar jeszcze jest)",
+            "narrative": "Hurtownia H1 zgłasza dostępność mąki.",
+            "rule": "Dostępność chwilowa: W systemach rozproszonych stan magazynu może ulec zmianie przed złożeniem zamówienia.",
             "item": {"name": "flour", "quantity": 5.0},
             "is_available": True,
-            "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "AVAILABILITY_RESPONSE", "item": {"name": "flour", "quantity": 5.0}, "is_available": True}
-        })
+            "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "AVAILABILITY_RESPONSE", "is_available": True}
+        }, bypass_dedup=True)
+
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "H2",
             "target": "R1",
             "message_type": "AVAILABILITY_RESPONSE",
-            "summary": "Krok 1: availability-response: H2 (is_available: true)",
+            "summary": "Krok 1: H2 potwierdza dostępność",
+            "narrative": "Hurtownia H2 również potwierdza obecność mąki.",
+            "rule": "Obie hurtownie zakwalifikowane do etapu ofert.",
             "item": {"name": "flour", "quantity": 5.0},
             "is_available": True,
-            "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "AVAILABILITY_RESPONSE", "item": {"name": "flour", "quantity": 5.0}, "is_available": True}
-        })
+            "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "AVAILABILITY_RESPONSE", "is_available": True}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
-        # Krok 2: Pobranie ofert
+        # Krok 2: Pobranie ofert (CFP)
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
             "source": "R1",
             "target": "H1",
             "message_type": "CALL_FOR_PROPOSAL",
-            "summary": "Krok 2: request_offer(flour, 5 kg) -> H1",
+            "summary": "Krok 2: CFP do Hurtowni H1",
+            "narrative": "R1 wysyła zapytanie ofertowe do H1.",
+            "rule": "Protokół CNP Krok 2.",
             "item": {"name": "flour", "quantity": 5.0},
             "raw_json": {"sender_id": "R1", "receiver_id": "H1", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "flour", "quantity": 5.0}}
-        })
+        }, bypass_dedup=True)
+
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
             "source": "R1",
             "target": "H2",
             "message_type": "CALL_FOR_PROPOSAL",
-            "summary": "Krok 2: request_offer(flour, 5 kg) -> H2",
+            "summary": "Krok 2: CFP do Hurtowni H2",
+            "narrative": "R1 wysyła zapytanie ofertowe do H2.",
+            "rule": "Protokół CNP Krok 2.",
             "item": {"name": "flour", "quantity": 5.0},
             "raw_json": {"sender_id": "R1", "receiver_id": "H2", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "flour", "quantity": 5.0}}
-        })
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
         # Krok 2b: Oferty sprzedawców
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
             "source": "H1",
             "target": "R1",
             "message_type": "PROPOSAL",
             "summary": "Krok 2: Oferta H1: 3.50 PLN/kg (Razem: 17.50 PLN)",
+            "narrative": "H1 proponuje 3.50 PLN/kg (17.50 PLN).",
+            "rule": "Oferta nr 1 w rankingu cenowym.",
             "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
             "total_cost": 17.50,
             "raw_json": {"sender_id": "H1", "receiver_id": "R1", "message_type": "PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 3.50}, "total_cost": 17.50}
-        })
+        }, bypass_dedup=True)
+
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
             "source": "H2",
             "target": "R1",
             "message_type": "PROPOSAL",
             "summary": "Krok 2: Oferta H2: 4.00 PLN/kg (Razem: 20.00 PLN)",
+            "narrative": "H2 proponuje 4.00 PLN/kg (20.00 PLN).",
+            "rule": "Oferta nr 2 w rankingu cenowym (rezerwowa).",
             "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
             "total_cost": 20.00,
             "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 4.00}, "total_cost": 20.00}
-        })
+        }, bypass_dedup=True)
         await asyncio.sleep(2.0)
 
-        # Krok 3 & 4: Kupujący wybiera najtańszą ofertę (H1) i wywołuje accept_offer
+        # Krok 3: Wybór najtańszego (H1)
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 3,
+            "step_title": "Wybór Najlepszej Oferty",
+            "source": "R1",
+            "target": "R1",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 3: Wybór oferty H1 (17.50 PLN), H2 zachowana jako Fallback",
+            "narrative": "Restauracja R1 wybiera tańszą ofertę H1, zachowując ofertę H2 w pamięci na wypadek problemów z realizacją.",
+            "rule": "Strategia Fallback: Przygotowanie planu awaryjnego na wypadek braku towaru u pierwszego wybranego sprzedawcy.",
+            "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
+            "total_cost": 17.50,
+            "raw_json": {"action": "EVALUATE_OFFERS", "primary_choice": "H1", "fallback_choice": "H2"}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # Krok 4: Próba akceptacji u H1
+        await broadcast_event({
+            "scenario_id": 2,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu / Obsługa Wyjątku",
             "source": "R1",
             "target": "H1",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: Wybór min(cena) -> accept_offer(H1, 17.50 PLN)",
+            "summary": "Krok 4: Próba akceptacji oferty w Hurtowni H1 (ACCEPT_PROPOSAL)",
+            "narrative": "Restauracja R1 wysyła akceptację do Hurtowni H1 na kwotę 17.50 PLN.",
+            "rule": "Krok 4 CNP.",
             "item": {"name": "flour", "quantity": 5.0, "price": 3.50},
             "total_cost": 17.50,
             "raw_json": {"sender_id": "R1", "receiver_id": "H1", "message_type": "ACCEPT_PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 3.50}, "total_cost": 17.50}
-        })
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
-        # Krok 4: SPRZEDAWCA H1 WERYFIKUJE STAN I ODRZUCA (Ścieżka B: Race condition / brak towaru)
+        # Krok 4: ODRZUCENIE PRZEZ H1 (Brak towaru / Race Condition)
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 4,
+            "step_title": "Odrzucenie Zamówienia (Brak Towaru)",
             "source": "H1",
             "target": "R1",
             "message_type": "REJECT_PROPOSAL",
-            "summary": "Krok 4 (Ścieżka B): Sprzedawca H1 odrzuca zamówienie (brak towaru / wyprzedany w międzyczasie)",
+            "summary": "Krok 4: ❌ Hurtownia H1 odrzuca zamówienie: Towar wyprzedany w międzyczasie!",
+            "narrative": "Hurtownia H1 weryfikuje bazę danych przed potwierdzeniem rezerwacji: inny klient wykupił ostatnie zapasy mąki ułamek sekundy wcześniej! H1 zwraca oficjalny błąd REJECT_PROPOSAL (OUT_OF_STOCK).",
+            "rule": "Obsługa Wyścigu Zasobów (Race Condition): Sprzedawca chroni spójność magazynu i nie potwierdza zamówienia bez pokrycia w towarze.",
             "item": {"name": "flour", "quantity": 5.0},
             "raw_json": {
                 "sender_id": "H1",
                 "receiver_id": "R1",
                 "message_type": "REJECT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0},
-                "reason": "OUT_OF_STOCK: Towar wyprzedany w międzyczasie"
+                "reason": "OUT_OF_STOCK: Towar został wyprzedany w międzyczasie przez inną transakcję",
+                "status": "REJECTED"
             }
-        })
-        await asyncio.sleep(2.0)
+        }, bypass_dedup=True)
+        await asyncio.sleep(2.2)
 
-        # Krok 4 (Fallback Kupującego): R1 natychmiast przechodzi do kolejnej oferty (H2)
+        # Krok 4b: AUTOMATYCZNY FALLBACK KUPUJĄCEGO DO H2
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 4,
+            "step_title": "Automatyczny Fallback do Oferty Rezerwowej",
             "source": "R1",
             "target": "H2",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: Fallback Kupującego -> accept_offer u kolejnego sprzedawcy: H2 (20.00 PLN)",
+            "summary": "Krok 4 (Fallback): R1 natychmiast zawiera kontrakt z Hurtownią H2 (20.00 PLN)",
+            "narrative": "Autonomiczny agent R1 nie poddaje się i nie angażuje człowieka. Natychmiast sięga po drugą ofertę ze swojej listy (Hurtownia H2: 20.00 PLN) i wysyła do niej ACCEPT_PROPOSAL.",
+            "rule": "Odporność Agentowa (Resilience): Agent automatycznie koryguje plan bez konieczności ponawiania całej procedury przetargowej od zera.",
             "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
             "total_cost": 20.00,
-            "raw_json": {
-                "sender_id": "R1",
-                "receiver_id": "H2",
-                "message_type": "ACCEPT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
-                "total_cost": 20.00
-            }
-        })
+            "raw_json": {"sender_id": "R1", "receiver_id": "H2", "message_type": "ACCEPT_PROPOSAL", "item": {"name": "flour", "quantity": 5.0, "price": 4.00}, "total_cost": 20.00, "fallback_mode": True}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
-        # Krok 4: Sprzedawca H2 potwierdza akceptację
+        # Krok 4c: H2 potwierdza zamówienie
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu z Dostawcą Rezerwowym",
             "source": "H2",
             "target": "R1",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: Sprzedawca H2 potwierdza przyjęcie zamówienia (rezerwacja towaru)",
+            "summary": "Krok 4: Hurtownia H2 potwierdza przyjęcie zamówienia (ORDER_CONFIRMED)",
+            "narrative": "Hurtownia H2 weryfikuje stan magazynowy, rezerwuje 5 kg mąki i odsyła potwierdzenie przyjęcia zamówienia.",
+            "rule": "Skuteczna finalizacja rezerwy: Transakcja została pomyślnie skierowana do alternatywnego dostawcy.",
             "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
             "total_cost": 20.00,
-            "raw_json": {
-                "sender_id": "H2",
-                "receiver_id": "R1",
-                "message_type": "ACCEPT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
-                "total_cost": 20.00,
-                "status": "ORDER_CONFIRMED"
-            }
-        })
+            "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "ACCEPT_PROPOSAL", "status": "ORDER_CONFIRMED", "total_cost": 20.00}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.5)
 
         # Krok 5: Bilansowanie bazy w SQLite dla transakcji R1 <-> H2
         try:
-            # 1. R1: odejmuje 20.00 PLN, dodaje 5 kg mąki
             if DB_PATHS["R1"].exists():
                 with sqlite3.connect(DB_PATHS["R1"], timeout=3.0) as conn:
                     conn.execute("UPDATE financial_account SET balance = balance - 20.00, updated_at = CURRENT_TIMESTAMP WHERE account_id = 'R1_WALLET'")
                     conn.execute("UPDATE inventory SET quantity = quantity + 5 WHERE name = 'flour'")
-                    conn.execute(
+                    cur_r1 = conn.execute(
                         "INSERT INTO transactions (account_id, transaction_type, amount, currency, description) VALUES (?, ?, ?, ?, ?)",
                         ("R1_WALLET", "EXPENSE", 20.00, "PLN", "Zakup 5 kg mąki od Hurtownia 2 (Fallback po Reject w H1)")
                     )
+                    last_seen_db_ids["R1"] = max(last_seen_db_ids["R1"], cur_r1.lastrowid or 0)
                     conn.commit()
 
-            # 2. H2: odejmuje 5 kg mąki, dopisuje 20.00 PLN do wallet_warehouse2
             if DB_PATHS["H2"].exists():
                 with sqlite3.connect(DB_PATHS["H2"], timeout=3.0) as conn:
                     conn.execute("UPDATE warehouse2 SET quantity = quantity - 5 WHERE LOWER(name) = 'flour'")
                     last_bal_row = conn.execute("SELECT ballance FROM wallet_warehouse2 ORDER BY id DESC LIMIT 1").fetchone()
                     last_bal = float(last_bal_row[0]) if last_bal_row else 1000.0
-                    conn.execute(
+                    cur_h2 = conn.execute(
                         "INSERT INTO wallet_warehouse2 (sender_id, receiver_id, type, ballance) VALUES (?, ?, ?, ?)",
                         ("R1", "H2", "INCOME", last_bal + 20.00)
                     )
+                    last_seen_db_ids["H2"] = max(last_seen_db_ids["H2"], cur_h2.lastrowid or 0)
                     conn.commit()
 
-            # Natychmiastowe odświeżenie UI
             updated_state = get_node_details()
             await broadcast_node_state(updated_state)
             logger.info("Real balance & inventory updated for CNP Reject & Fallback (R1, H2).")
         except Exception as e:
             logger.error(f"Error executing balance update in reject demo: {e}", exc_info=True)
 
-        # Krok 5: Sprzedawca H2 dostarcza towar
+        # Krok 5: Hurtownia H2 dostarcza towar
         await broadcast_event({
+            "scenario_id": 2,
+            "step": 5,
+            "step_title": "Rozliczenie Finansowe i Dostawa",
             "source": "H2",
             "target": "R1",
             "message_type": "DELIVERY",
-            "summary": "Krok 5: receive_delivery: H2 dostarcza 5 kg mąki do R1 (rozliczono 20.00 PLN)",
+            "summary": "Krok 5: Hurtownia H2 dostarcza 5 kg mąki do R1 (DELIVERY)",
+            "narrative": "Hurtownia H2 dostarcza towar do Restauracji R1. Salda zbilansowane: R1: -20.00 PLN (+5 kg mąki), H2: +20.00 PLN (-5 kg mąki).",
+            "rule": "Finalizacja procedury awaryjnej: Mimo odmowy pierwszego sprzedawcy, łańcuch dostaw restauracji zachował ciągłość operacyjną.",
             "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
             "total_cost": 20.00,
-            "raw_json": {
-                "sender_id": "H2",
-                "receiver_id": "R1",
-                "message_type": "DELIVERY",
-                "item": {"name": "flour", "quantity": 5.0, "price": 4.00},
-                "total_cost": 20.00,
-                "status": "DELIVERED"
-            }
-        })
+            "raw_json": {"sender_id": "H2", "receiver_id": "R1", "message_type": "DELIVERY", "item": {"name": "flour", "quantity": 5.0, "price": 4.00}, "total_cost": 20.00, "status": "DELIVERED"}
+        }, bypass_dedup=True)
 
         await asyncio.sleep(0.5)
         await broadcast_node_state(get_node_details())
+        await broadcast_scenario_end(2, "Scenariusz 2: Procedura Odrzucenia i Fallback Zakończona Sukcesem", "Agent R1 samodzielnie obsłużył brak towaru u pierwszego oferenta i pomyślnie zaopatrzył restaurację u sprzedawcy rezerwowego.")
 
     asyncio.create_task(run_reject_demo())
-    return {"status": "started", "message": "Uruchomiono cykl CNP ze Ścieżką B (Odrzucenie przez sprzedawcę i Fallback kupującego)."}
+    return {"status": "started", "scenario_id": 2, "message": "Uruchomiono cykl CNP z odrzuceniem i procedurą Fallback."}
 
 
 @app.post("/api/simulate/h1-p1-flow")
 async def api_simulate_h1_p1_flow():
     """
-    KROK PO KROKU ZGODNIE ZE SPECYFIKACJĄ PROTOKOŁU DLA RELACJI HURTOWNIA ➔ PRODUCENT:
-    Hurtownia H1 (Kupujący) i Producent P1 (Sprzedający):
-    1. Kupujący H1 -> Sprzedający P1: check_availability (AVAILABILITY_REQUEST na 25 kg mąki)
-    2. Sprzedający P1 -> Kupujący H1: availability-response (AVAILABILITY_RESPONSE)
-    3. Kupujący H1 -> Sprzedający P1: request_offer (CALL_FOR_PROPOSAL)
-    4. Sprzedający P1 -> Kupujący H1: response-offer (PROPOSAL, 2.50 PLN/kg -> 62.50 PLN)
-    5. H1 ocenia ofertę i weryfikuje budżet w portfelu.
-    6. Kupujący H1 -> Sprzedający P1: accept_offer (ACCEPT_PROPOSAL).
-       Sprzedający P1 weryfikuje bazę i odpowiada: P1 -> H1: accept-offer (ACCEPT_PROPOSAL).
-    7. Sprzedający P1 bilansuje bazę i realizuje dostawę: P1 -> H1: receive_delivery (DELIVERY).
-       Kupujący H1 bilansuje portfel i magazyn.
+    SCENARIUSZ 3: DOSTAWA HURTOWA OD PRODUCENTA (H1 -> P1)
+    Hurtownia H1 staje się Kupującym, a Producent P1 Sprzedającym.
+    Demonstracja rekurencyjności protokołu w łańcuchu dostaw.
     """
     async def run_h1_p1():
+        await broadcast_scenario_start(
+            3,
+            "Scenariusz 3: Dostawa Hurtowa od Producenta (H1 -> P1)",
+            "Hurtownia H1 uzupełnia stan magazynowy, zamawiając 25 kg mąki bezpośrednio u Producenta P1 po cenie fabrycznej (2.50 PLN/kg). Demonstruje to rekurencyjną rolę agentów (Hurtownia jako kupujący)."
+        )
+        await asyncio.sleep(1.0)
+
         # Krok 1: H1 sprawdza dostępność u P1
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "H1",
             "target": "P1",
             "message_type": "AVAILABILITY_REQUEST",
-            "summary": "Krok 1: check_availability(flour, 25 kg) -> P1",
+            "summary": "Krok 1: Hurtownia H1 pyta Producenta P1 o 25 kg mąki",
+            "narrative": "Hurtownia H1, działając jako Kupujący, sonduje moce produkcyjne i stan magazynowy Producenta P1 na 25 kg mąki.",
+            "rule": "Rekurencja protokołu: Rola kupującego i sprzedającego powtarza się na każdym szczeblu wielopoziomowego łańcucha dostaw.",
             "item": {"name": "flour", "quantity": 25.0},
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "P1",
-                "message_type": "AVAILABILITY_REQUEST",
-                "item": {"name": "flour", "quantity": 25.0}
-            }
-        })
+            "raw_json": {"sender_id": "H1", "receiver_id": "P1", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "flour", "quantity": 25.0}}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
         # Krok 1b: P1 potwierdza dostępność
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
             "source": "P1",
             "target": "H1",
             "message_type": "AVAILABILITY_RESPONSE",
-            "summary": "Krok 1: availability-response od P1 (is_available: true)",
+            "summary": "Krok 1: Producent P1 potwierdza dostępność partii hurtowej",
+            "narrative": "Producent P1 potwierdza: partia 25 kg mąki jest dostępna na magazynie fabrycznym.",
+            "rule": "Kwalifikacja zamówienia hurtowego.",
             "item": {"name": "flour", "quantity": 25.0},
             "is_available": True,
-            "raw_json": {
-                "sender_id": "P1",
-                "receiver_id": "H1",
-                "message_type": "AVAILABILITY_RESPONSE",
-                "item": {"name": "flour", "quantity": 25.0},
-                "is_available": True
-            }
-        })
+            "raw_json": {"sender_id": "P1", "receiver_id": "H1", "message_type": "AVAILABILITY_RESPONSE", "item": {"name": "flour", "quantity": 25.0}, "is_available": True}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
-        # Krok 2: H1 wysyła zapytanie ofertowe (CFP) do P1
+        # Krok 2: H1 wysyła zapytanie ofertowe (CFP)
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
             "source": "H1",
             "target": "P1",
             "message_type": "CALL_FOR_PROPOSAL",
-            "summary": "Krok 2: request_offer(flour, 25 kg) -> P1",
+            "summary": "Krok 2: Hurtownia H1 żąda oferty cenowej hurtowej u P1",
+            "narrative": "Hurtownia H1 wysyła formalne zapytanie ofertowe (CFP) o cenę fabryczną dla wolumenu hurtowego 25 kg.",
+            "rule": "Krok 2 CNP w relacji B2B.",
             "item": {"name": "flour", "quantity": 25.0},
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "P1",
-                "message_type": "CALL_FOR_PROPOSAL",
-                "item": {"name": "flour", "quantity": 25.0}
-            }
-        })
+            "raw_json": {"sender_id": "H1", "receiver_id": "P1", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "flour", "quantity": 25.0}}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
-        # Krok 2b: P1 składa ofertę z rabatem hurtowym
+        # Krok 2b: P1 składa ofertę fabryczną
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
             "source": "P1",
             "target": "H1",
             "message_type": "PROPOSAL",
-            "summary": "Krok 2: response-offer od P1: 2.50 PLN/kg (Razem: 62.50 PLN)",
+            "summary": "Krok 2: Oferta fabryczna P1: 2.50 PLN/kg (Razem: 62.50 PLN)",
+            "narrative": "Producent P1 proponuje hurtową cenę fabryczną 2.50 PLN/kg, co daje łącznie 62.50 PLN za 25 kg mąki.",
+            "rule": "Cena producenta: Niższy koszt bazowy pozwala hurtowni wygenerować marżę przy dalszej odsprzedaży restauracjom.",
             "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
             "total_cost": 62.50,
-            "raw_json": {
-                "sender_id": "P1",
-                "receiver_id": "H1",
-                "message_type": "PROPOSAL",
-                "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
-                "total_cost": 62.50
-            }
-        })
+            "raw_json": {"sender_id": "P1", "receiver_id": "H1", "message_type": "PROPOSAL", "item": {"name": "flour", "quantity": 25.0, "price": 2.50}, "total_cost": 62.50}
+        }, bypass_dedup=True)
         await asyncio.sleep(2.0)
 
-        # Krok 4: H1 akceptuje ofertę u P1 (accept_offer)
+        # Krok 3: Analiza oferty przez Hurtownię H1
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 3,
+            "step_title": "Wybór Najlepszej Oferty",
+            "source": "H1",
+            "target": "H1",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 3: Hurtownia H1 weryfikuje budżet i akceptuje marżę hurtową",
+            "narrative": "Hurtownia H1 sprawdza stan swojego konta firmowego i stwierdza pełną opłacalność zakupu po cenie fabrycznej 2.50 PLN/kg.",
+            "rule": "Weryfikacja płynności finansowej: Agent kupujący sprawdza stan portfela przed podjęciem zobowiązania.",
+            "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
+            "total_cost": 62.50,
+            "raw_json": {"action": "EVALUATE_OFFERS", "producer": "P1", "margin_check": "APPROVED", "total_cost": 62.50}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # Krok 4: H1 akceptuje ofertę u P1
+        await broadcast_event({
+            "scenario_id": 3,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu Hurtowego",
             "source": "H1",
             "target": "P1",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: accept_offer u Producenta P1 (62.50 PLN)",
+            "summary": "Krok 4: Hurtownia H1 akceptuje ofertę Producenta P1 (ACCEPT_PROPOSAL)",
+            "narrative": "Hurtownia H1 zatwierdza kontrakt na dostawę 25 kg mąki za kwotę 62.50 PLN.",
+            "rule": "Krok 4 CNP.",
             "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
             "total_cost": 62.50,
-            "raw_json": {
-                "sender_id": "H1",
-                "receiver_id": "P1",
-                "message_type": "ACCEPT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
-                "total_cost": 62.50
-            }
-        })
+            "raw_json": {"sender_id": "H1", "receiver_id": "P1", "message_type": "ACCEPT_PROPOSAL", "item": {"name": "flour", "quantity": 25.0, "price": 2.50}, "total_cost": 62.50}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.8)
 
         # Krok 4b: P1 potwierdza akceptację
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu Hurtowego",
             "source": "P1",
             "target": "H1",
             "message_type": "ACCEPT_PROPOSAL",
-            "summary": "Krok 4: Producent P1 potwierdza przyjęcie zamówienia (rezerwacja)",
+            "summary": "Krok 4: Producent P1 potwierdza zamówienie fabryczne (ORDER_CONFIRMED)",
+            "narrative": "Producent P1 rejestruje zamówienie w systemie fabrycznym i rezerwuje paletę mąki do wysyłki.",
+            "rule": "Rezerwacja mocy produkcyjnych.",
             "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
             "total_cost": 62.50,
-            "raw_json": {
-                "sender_id": "P1",
-                "receiver_id": "H1",
-                "message_type": "ACCEPT_PROPOSAL",
-                "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
-                "total_cost": 62.50,
-                "status": "ORDER_CONFIRMED"
-            }
-        })
+            "raw_json": {"sender_id": "P1", "receiver_id": "H1", "message_type": "ACCEPT_PROPOSAL", "status": "ORDER_CONFIRMED"}
+        }, bypass_dedup=True)
         await asyncio.sleep(1.5)
 
-        # Krok 5: Bilansowanie bazy danych u P1 i H1
+        # Krok 5: Bilansowanie bazy danych w SQLite u P1 i H1
         try:
-            # 1. P1: odejmuje 25 kg mąki, rejestruje sprzedaż w sales_transactions
             if DB_PATHS["P1"].exists():
                 with sqlite3.connect(DB_PATHS["P1"], timeout=3.0) as conn:
                     conn.execute("UPDATE products SET stock_quantity = stock_quantity - 25.0 WHERE product_code = 'flour'")
@@ -1349,15 +1579,15 @@ async def api_simulate_h1_p1_flow():
                     last_seen_db_ids["P1"] = max(last_seen_db_ids["P1"], cur_p1.lastrowid or 0)
                     conn.commit()
 
-            # 2. H1: dodaje 25 kg mąki do produktów, odejmuje 62.50 PLN z konta, rejestruje transakcję
             if DB_PATHS["H1"].exists():
                 with sqlite3.connect(DB_PATHS["H1"], timeout=3.0) as conn:
                     conn.execute("UPDATE account SET balance = balance - 62.50 WHERE id = 1")
                     conn.execute("UPDATE products SET quantity = quantity + 25 WHERE name = 'flour'")
-                    conn.execute(
+                    cur_h1 = conn.execute(
                         "INSERT INTO transactions (partner, type, item_name, quantity, total_cost) VALUES (?, ?, ?, ?, ?)",
                         ("P1", "PURCHASE", "flour", 25, 62.50)
                     )
+                    last_seen_db_ids["H1"] = max(last_seen_db_ids["H1"], cur_h1.lastrowid or 0)
                     conn.commit()
 
             updated_state = get_node_details()
@@ -1368,27 +1598,345 @@ async def api_simulate_h1_p1_flow():
 
         # Krok 5: Producent P1 dostarcza towar do H1
         await broadcast_event({
+            "scenario_id": 3,
+            "step": 5,
+            "step_title": "Rozliczenie Finansowe i Dostawa",
             "source": "P1",
             "target": "H1",
             "message_type": "DELIVERY",
-            "summary": "Krok 5: receive_delivery: P1 dostarcza 25 kg mąki do H1 (rozliczono 62.50 PLN)",
+            "summary": "Krok 5: Producent P1 dostarcza 25 kg mąki do Hurtowni H1 (DELIVERY)",
+            "narrative": "Producent P1 realizuje dostawę fabryczną do Hurtowni H1. Magazyn H1 powiększa się o 25 kg mąki, a saldo zostaje obciążone kwotą 62.50 PLN.",
+            "rule": "Finalizacja kontraktu B2B w SQLite.",
             "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
             "total_cost": 62.50,
-            "raw_json": {
-                "sender_id": "P1",
-                "receiver_id": "H1",
-                "message_type": "DELIVERY",
-                "item": {"name": "flour", "quantity": 25.0, "price": 2.50},
-                "total_cost": 62.50,
-                "status": "DELIVERED"
-            }
-        })
+            "raw_json": {"sender_id": "P1", "receiver_id": "H1", "message_type": "DELIVERY", "item": {"name": "flour", "quantity": 25.0, "price": 2.50}, "total_cost": 62.50, "status": "DELIVERED"}
+        }, bypass_dedup=True)
 
         await asyncio.sleep(0.5)
         await broadcast_node_state(get_node_details())
+        await broadcast_scenario_end(3, "Scenariusz 3: Zaopatrzenie Hurtowe Zakończone Sukcesem", "Hurtownia H1 uzupełniła stan magazynowy o 25 kg mąki u Producenta P1, przygotowując się do dalszej dystrybucji.")
 
     asyncio.create_task(run_h1_p1())
-    return {"status": "started", "message": "Uruchomiono 5-etapowy proces CNP dla Hurtownia H1 ➔ Producent P1."}
+    return {"status": "started", "scenario_id": 3, "message": "Uruchomiono 5-etapowy proces CNP dla Hurtownia H1 -> Producent P1."}
+
+
+@app.post("/api/simulate/hitl-flow")
+async def api_simulate_hitl_flow():
+    """
+    SCENARIUSZ 4: DECYZJA CZŁOWIEKA (HUMAN-IN-THE-LOOP) - RESTAURACJA R2
+    Restauracja R2 poszukuje 10 kg sera Mozzarella.
+    Agent porównuje oferty H1 i H2, wybiera najtańszą (H1: 85 PLN vs H2: 145 PLN),
+    lecz ZGODNIE Z POLITYKĄ HITL wstrzymuje transakcję i oczekuje na kliknięcie człowieka w UI!
+    Po zatwierdzeniu przez operatora, transakcja zostaje sfinalizowana w SQLite.
+    """
+    global active_hitl_event, hitl_decision
+    active_hitl_event = asyncio.Event()
+    hitl_decision = None
+
+    async def run_hitl():
+        global hitl_decision
+        await broadcast_scenario_start(
+            4,
+            "Scenariusz 4: Decyzja Człowieka (Human-in-the-Loop)",
+            "Restauracja R2 zamawia 10 kg sera Mozzarella. Polityka firmy nakazuje autoryzację każdego zakupu przez człowieka. Agent autonomicznie porówna oferty, przygotuje rekomendację i zatrzyma się, czekając na Twoją zgodę."
+        )
+        await asyncio.sleep(1.0)
+
+        # Krok 1: R2 sprawdza dostępność 10 kg Mozzarelli w H1 i H2
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
+            "source": "R2",
+            "target": "H1",
+            "message_type": "AVAILABILITY_REQUEST",
+            "summary": "Krok 1: Restauracja R2 sprawdza dostępność 10 kg sera Mozzarella w H1",
+            "narrative": "Agent Restauracji 2 (R2) sonduje rynek pod kątem 10 kg sera Mozzarella w Hurtowni H1.",
+            "rule": "Krok 1 CNP.",
+            "item": {"name": "Mozzarella", "quantity": 10.0},
+            "raw_json": {"sender_id": "R2", "receiver_id": "H1", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "Mozzarella", "quantity": 10.0}}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
+            "source": "R2",
+            "target": "H2",
+            "message_type": "AVAILABILITY_REQUEST",
+            "summary": "Krok 1: Restauracja R2 sprawdza dostępność 10 kg sera Mozzarella w H2",
+            "narrative": "Agent R2 równolegle sprawdza dostępność sera Mozzarella w Hurtowni H2.",
+            "rule": "Równoległe zapytanie ofertowe.",
+            "item": {"name": "Mozzarella", "quantity": 10.0},
+            "raw_json": {"sender_id": "R2", "receiver_id": "H2", "message_type": "AVAILABILITY_REQUEST", "item": {"name": "Mozzarella", "quantity": 10.0}}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # Krok 1b: Hurtownie potwierdzają dostępność
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
+            "source": "H1",
+            "target": "R2",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 1: Hurtownia H1 potwierdza dostępność Mozzarelli",
+            "narrative": "Hurtownia H1 zgłasza dostępność sera Mozzarella (140 kg na stanie).",
+            "rule": "Oferent zakwalifikowany.",
+            "item": {"name": "Mozzarella", "quantity": 10.0},
+            "is_available": True,
+            "raw_json": {"sender_id": "H1", "receiver_id": "R2", "message_type": "AVAILABILITY_RESPONSE", "is_available": True}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 1,
+            "step_title": "Weryfikacja Dostępności Towaru",
+            "source": "H2",
+            "target": "R2",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 1: Hurtownia H2 potwierdza dostępność Mozzarelli",
+            "narrative": "Hurtownia H2 również potwierdza obecność Mozzarelli (58 kg na stanie).",
+            "rule": "Oferent zakwalifikowany.",
+            "item": {"name": "Mozzarella", "quantity": 10.0},
+            "is_available": True,
+            "raw_json": {"sender_id": "H2", "receiver_id": "R2", "message_type": "AVAILABILITY_RESPONSE", "is_available": True}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # Krok 2: Pobranie ofert (CFP)
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "R2",
+            "target": "H1",
+            "message_type": "CALL_FOR_PROPOSAL",
+            "summary": "Krok 2: CFP na 10 kg Mozzarelli -> H1",
+            "narrative": "Restauracja R2 wzywa Hurtownię H1 do złożenia oferty cenowej.",
+            "rule": "Krok 2 CNP.",
+            "item": {"name": "Mozzarella", "quantity": 10.0},
+            "raw_json": {"sender_id": "R2", "receiver_id": "H1", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "Mozzarella", "quantity": 10.0}}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "R2",
+            "target": "H2",
+            "message_type": "CALL_FOR_PROPOSAL",
+            "summary": "Krok 2: CFP na 10 kg Mozzarelli -> H2",
+            "narrative": "Restauracja R2 wzywa Hurtownię H2 do złożenia oferty cenowej.",
+            "rule": "Krok 2 CNP.",
+            "item": {"name": "Mozzarella", "quantity": 10.0},
+            "raw_json": {"sender_id": "R2", "receiver_id": "H2", "message_type": "CALL_FOR_PROPOSAL", "item": {"name": "Mozzarella", "quantity": 10.0}}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # Krok 2b: Oferty sprzedawców (H1 dużo tańsza!)
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "H1",
+            "target": "R2",
+            "message_type": "PROPOSAL",
+            "summary": "Krok 2: Oferta H1: 8.50 PLN/kg (Razem: 85.00 PLN)",
+            "narrative": "Hurtownia H1 składa bardzo atrakcyjną ofertę: 8.50 PLN/kg, co daje łącznie 85.00 PLN za 10 kg Mozzarelli.",
+            "rule": "Oferta wiodąca w rankingu.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "raw_json": {"sender_id": "H1", "receiver_id": "R2", "message_type": "PROPOSAL", "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50}, "total_cost": 85.00}
+        }, bypass_dedup=True)
+
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 2,
+            "step_title": "Zbieranie Ofert Cenowych (CFP)",
+            "source": "H2",
+            "target": "R2",
+            "message_type": "PROPOSAL",
+            "summary": "Krok 2: Oferta H2: 14.50 PLN/kg (Razem: 145.00 PLN)",
+            "narrative": "Hurtownia H2 oferuje tę samą ilość w cenie 14.50 PLN/kg (całkowity koszt: 145.00 PLN).",
+            "rule": "Różnica w cenie wynosi aż 60.00 PLN na korzyść H1.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 14.50},
+            "total_cost": 145.00,
+            "raw_json": {"sender_id": "H2", "receiver_id": "R2", "message_type": "PROPOSAL", "item": {"name": "Mozzarella", "quantity": 10.0, "price": 14.50}, "total_cost": 145.00}
+        }, bypass_dedup=True)
+        await asyncio.sleep(2.0)
+
+        # Krok 3: Analiza i Wybór Rekomendacji
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 3,
+            "step_title": "Wybór Najlepszej Oferty",
+            "source": "R2",
+            "target": "R2",
+            "message_type": "AVAILABILITY_RESPONSE",
+            "summary": "Krok 3: Agent R2 wybiera H1 (85.00 PLN), oszczędność 60.00 PLN",
+            "narrative": "Agent R2 wylicza, że oferta Hurtowni H1 (85.00 PLN) pozwala zaoszczędzić 60.00 PLN w stosunku do H2 (145.00 PLN). Rekomendacja zakupu zostaje przygotowana.",
+            "rule": "Nadzorowana Autonomia (HITL): Zanim kontrakt zostanie podpisany, agent R2 ma obowiązek uzyskać akceptację człowieka.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "raw_json": {"action": "EVALUATE_OFFERS", "recommended": "H1", "total_cost": 85.00, "alternative": "H2", "savings": 60.00}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # KROK 4: WSTRZYMANIE I OCZEKIWANIE NA DECYZJĘ CZŁOWIEKA (HITL)
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 4,
+            "step_title": "Weryfikacja i Decyzja Człowieka (HITL)",
+            "source": "R2",
+            "target": "OPERATOR",
+            "message_type": "WAITING_HUMAN_APPROVAL",
+            "summary": "Krok 4: ⚠️ WYMAGANA AKCEPTACJA CZŁOWIEKA: Zakup 10 kg Mozzarelli za 85.00 PLN",
+            "narrative": "AGENT R2 ZATRZYMUJE TRANSAKCJĘ! Zgodnie z polityką Human-in-the-Loop, agent nie obciąża konta restauracji bez potwierdzenia. Kliknij przycisk 'Zatwierdź zakup' w panelu po prawej stronie, aby autoryzować wydatek.",
+            "rule": "Reguła Bezpieczeństwa HITL: Wydatki powyżej ustalonego progu wymagają fizycznego podpisu/potwierdzenia przez uprawnionego pracownika restauracji.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "requires_approval": True,
+            "raw_json": {
+                "sender_id": "R2",
+                "receiver_id": "OPERATOR_UI",
+                "message_type": "WAITING_HUMAN_APPROVAL",
+                "item": {"name": "Mozzarella", "quantity": 10.0, "unit_price": 8.50},
+                "total_cost": 85.00,
+                "seller": "H1",
+                "status": "AWAITING_APPROVAL"
+            }
+        }, bypass_dedup=True)
+
+        logger.info("[HITL] Waiting up to 30 seconds for operator decision...")
+        try:
+            await asyncio.wait_for(active_hitl_event.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.info("[HITL] Timeout reached. Defaulting to auto-approve for demonstration.")
+            hitl_decision = "approve"
+
+        # Rozpatrzenie decyzji
+        if hitl_decision == "reject":
+            await broadcast_event({
+                "scenario_id": 4,
+                "step": 4,
+                "step_title": "Anulowanie przez Człowieka",
+                "source": "OPERATOR",
+                "target": "R2",
+                "message_type": "REJECT_PROPOSAL",
+                "summary": "Krok 4: ❌ Operator odrzucił transakcję. Proces anulowany.",
+                "narrative": "Człowiek odrzucił wniosek o zakup. Agent R2 szanuje decyzję operatora i natychmiast anuluje procedurę, nie obciążając budżetu restauracji.",
+                "rule": "Nadrzędność człowieka: Decyzja operatora ma priorytet bezwzględny nad autonomią agenta.",
+                "raw_json": {"status": "REJECTED_BY_OPERATOR", "reason": "Operator manually declined the purchase."}
+            }, bypass_dedup=True)
+            await broadcast_scenario_end(4, "Scenariusz 4 Zakończony: Transakcja Anulowana", "Decyzją człowieka transakcja została bezpiecznie przerwana bez wydatkowania środków.")
+            return
+
+        # Jeśli zatwierdzone (approve):
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 4,
+            "step_title": "Autoryzacja Udzielona przez Człowieka",
+            "source": "OPERATOR",
+            "target": "R2",
+            "message_type": "ACCEPT_PROPOSAL",
+            "summary": "Krok 4: ✅ Operator zatwierdził wydatek 85.00 PLN. Agent finalizuje zakup.",
+            "narrative": "Operator udzielił autoryzacji! Agent R2 przystępuje do formalnego zawarcia kontraktu z Hurtownią H1.",
+            "rule": "Podpisanie cyfrowe: Zgoda człowieka zwalnia blokadę finansową agenta.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "raw_json": {"status": "APPROVED_BY_OPERATOR", "total_cost": 85.00}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.5)
+
+        # R2 wysyła formalny ACCEPT_PROPOSAL do H1
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu z Hurtownią",
+            "source": "R2",
+            "target": "H1",
+            "message_type": "ACCEPT_PROPOSAL",
+            "summary": "Krok 4: R2 składa zamówienie w Hurtowni H1 (ACCEPT_PROPOSAL)",
+            "narrative": "Restauracja R2 wysyła oficjalną akceptację oferty do Hurtowni H1 (85.00 PLN).",
+            "rule": "Krok 4 CNP.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "raw_json": {"sender_id": "R2", "receiver_id": "H1", "message_type": "ACCEPT_PROPOSAL", "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50}, "total_cost": 85.00}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.8)
+
+        # H1 potwierdza akceptację
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 4,
+            "step_title": "Zawarcie Kontraktu z Hurtownią",
+            "source": "H1",
+            "target": "R2",
+            "message_type": "ACCEPT_PROPOSAL",
+            "summary": "Krok 4: Hurtownia H1 potwierdza przyjęcie zamówienia (ORDER_CONFIRMED)",
+            "narrative": "Hurtownia H1 rezerwuje 10 kg Mozzarelli i potwierdza gotowość do wysyłki.",
+            "rule": "Rezerwacja zasobów sprzedawcy.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "raw_json": {"sender_id": "H1", "receiver_id": "R2", "message_type": "ACCEPT_PROPOSAL", "status": "ORDER_CONFIRMED"}
+        }, bypass_dedup=True)
+        await asyncio.sleep(1.5)
+
+        # Krok 5: Bilansowanie baz w SQLite (R2 i H1)
+        try:
+            # 1. R2: odejmuje 85.00 PLN, dodaje 10 kg Mozzarelli
+            if DB_PATHS["R2"].exists():
+                with sqlite3.connect(DB_PATHS["R2"], timeout=3.0) as conn:
+                    conn.execute("UPDATE konto SET balans = balans - 85.00 WHERE id = 1")
+                    conn.execute("UPDATE magazyn SET ilosc = ilosc + 10 WHERE LOWER(nazwa_produktu) = 'mozzarella'")
+                    cur_r2 = conn.execute(
+                        "INSERT INTO historia_transakcji (typ_akcji, od_kogo, produkt, ilosc, koszt, data) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                        ("DOSTAWA CNP (HITL)", "H1", "Mozzarella", 10.0, 85.00)
+                    )
+                    last_seen_db_ids["R2"] = max(last_seen_db_ids["R2"], cur_r2.lastrowid or 0)
+                    conn.commit()
+
+            # 2. H1: odejmuje 10 kg sera mozzarella, dodaje 85.00 PLN do konta
+            if DB_PATHS["H1"].exists():
+                with sqlite3.connect(DB_PATHS["H1"], timeout=3.0) as conn:
+                    conn.execute("UPDATE account SET balance = balance + 85.00 WHERE id = 1")
+                    conn.execute("UPDATE products SET quantity = quantity - 10 WHERE name = 'mozzarella'")
+                    cur_h1 = conn.execute(
+                        "INSERT INTO transactions (partner, type, item_name, quantity, total_cost) VALUES (?, ?, ?, ?, ?)",
+                        ("Restauracja R2", "SALE", "mozzarella", 10, 85.00)
+                    )
+                    last_seen_db_ids["H1"] = max(last_seen_db_ids["H1"], cur_h1.lastrowid or 0)
+                    conn.commit()
+
+            updated_state = get_node_details()
+            await broadcast_node_state(updated_state)
+            logger.info("Real balance & inventory updated for HITL (R2, H1).")
+        except Exception as e:
+            logger.error(f"Error executing balance update in HITL demo: {e}", exc_info=True)
+
+        # Krok 5: Hurtownia H1 dostarcza Mozzarellę do R2
+        await broadcast_event({
+            "scenario_id": 4,
+            "step": 5,
+            "step_title": "Rozliczenie Finansowe i Dostawa",
+            "source": "H1",
+            "target": "R2",
+            "message_type": "DELIVERY",
+            "summary": "Krok 5: Hurtownia H1 dostarcza 10 kg sera Mozzarella do Restauracji R2 (DELIVERY)",
+            "narrative": "Hurtownia H1 dostarcza ser do kuchni Restauracji 2. Bazy danych zbilansowane: R2: -85.00 PLN (+10 kg Mozzarella), H1: +85.00 PLN (-10 kg Mozzarella).",
+            "rule": "Spójność ACID i pełna ewidencja transakcji pod nadzorem człowieka.",
+            "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50},
+            "total_cost": 85.00,
+            "raw_json": {"sender_id": "H1", "receiver_id": "R2", "message_type": "DELIVERY", "item": {"name": "Mozzarella", "quantity": 10.0, "price": 8.50}, "total_cost": 85.00, "status": "DELIVERED"}
+        }, bypass_dedup=True)
+
+        await asyncio.sleep(0.5)
+        await broadcast_node_state(get_node_details())
+        await broadcast_scenario_end(4, "Scenariusz 4: Transakcja Nadzorowana (HITL) Zakończona Sukcesem", "Agent R2 wynegocjował optymalne warunki, uzyskał zgodę człowieka, a transakcja została bezpiecznie rozliczona.")
+
+    asyncio.create_task(run_hitl())
+    return {"status": "started", "scenario_id": 4, "message": "Uruchomiono cykl handlu z procedurą Human-in-the-Loop."}
 
 
 # Serve static web frontend

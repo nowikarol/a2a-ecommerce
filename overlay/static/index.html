@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A2A Supply Chain Network Visualizer</title>
+  <title>A2A Trade Flow Demonstrator — Wizualizacja Handlu Agentów</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="app-container">
@@ -17,31 +17,19 @@
         <div class="logo-badge">
           <span class="logo-icon">🌐</span>
           <div class="logo-texts">
-            <h1>A2A Supply Chain Visualizer</h1>
-            <p>Wizualizacja komunikacji agentów w czasie rzeczywistym • MCP & CNP Protocol</p>
+            <h1>A2A Trade Flow Demonstrator</h1>
+            <p>Wizualizacja autonomicznego handlu agentów w protokołach MCP i Contract Net Protocol (CNP)</p>
           </div>
         </div>
       </div>
 
-      <div class="header-center">
-        <div class="toolbar">
-          <button class="btn btn-primary" id="btn-demo" title="CNP Ścieżka A (Sukces): 5 kroków Kupujący ➔ Sprzedający zgodnie ze specyfikacją">
-            <span class="btn-icon">⚡</span> CNP: Sukces (R1 ➔ H1)
-          </button>
-          <button class="btn btn-secondary" id="btn-demo-reject" title="CNP Ścieżka B: Sprzedawca odrzuca (REJECT ❌), Kupujący wykonuje Fallback">
-            <span class="btn-icon">❌</span> CNP: Odrzucenie i Fallback
-          </button>
-          <button class="btn btn-secondary" id="btn-h1-buy" title="5-etapowy proces CNP dla relacji Hurtownia H1 (Kupujący) ➔ Producent P1 (Sprzedający)">
-            <span class="btn-icon">🌾</span> H1 ➔ P1 (CNP Hurtownia ➔ Producent)
-          </button>
-          <button class="btn btn-secondary" id="btn-toggle-chat" title="Przełącz do czatu z agentami w panelu bocznym">
-            <span class="btn-icon">💬</span> Czat z Agentami
-          </button>
-        </div>
-      </div>
-
       <div class="header-right">
-        <button class="icon-btn" id="btn-sound" title="Dźwięki zdarzeń">
+        <div class="speed-control">
+          <span class="speed-label">Prędkość animacji:</span>
+          <input type="range" id="speed-slider" min="800" max="3000" step="200" value="1800">
+          <span id="speed-val">1.8s</span>
+        </div>
+        <button class="icon-btn" id="btn-sound" title="Włącz/wyłącz dźwięk zdarzeń">
           <span id="sound-icon">🔊</span>
         </button>
         <div class="connection-status" id="connection-status">
@@ -51,23 +39,154 @@
       </div>
     </header>
 
-    <!-- Main Workspace -->
+    <!-- Scenario Selection Bar (4 Distinct Scenarios) -->
+    <section class="scenario-bar">
+      <div class="scenario-bar-label">
+        <span class="sb-indicator"></span>
+        <span>Wybierz Scenariusz Handlu:</span>
+      </div>
+
+      <div class="scenario-cards-container">
+        <!-- Scenario 1 -->
+        <button class="scenario-card" id="btn-scen-1" onclick="triggerScenario(1)">
+          <div class="sc-icon-wrapper scen-1">⚡</div>
+          <div class="sc-content">
+            <div class="sc-top">
+              <span class="sc-badge badge-success">Ścieżka Sukcesu</span>
+            </div>
+            <h3 class="sc-title">1. Standardowy Cykl CNP</h3>
+            <p class="sc-desc">R1 ➔ H1 i H2: Wybór najtańszego oferenta i dostawa</p>
+          </div>
+        </button>
+
+        <!-- Scenario 2 -->
+        <button class="scenario-card" id="btn-scen-2" onclick="triggerScenario(2)">
+          <div class="sc-icon-wrapper scen-2">❌</div>
+          <div class="sc-content">
+            <div class="sc-top">
+              <span class="sc-badge badge-warning">Odporność / Fallback</span>
+            </div>
+            <h3 class="sc-title">2. Odrzucenie i Fallback</h3>
+            <p class="sc-desc">H1 brak towaru ➔ automatyczny zakup u drugiego dostawcy</p>
+          </div>
+        </button>
+
+        <!-- Scenario 3 -->
+        <button class="scenario-card" id="btn-scen-3" onclick="triggerScenario(3)">
+          <div class="sc-icon-wrapper scen-3">🌾</div>
+          <div class="sc-content">
+            <div class="sc-top">
+              <span class="sc-badge badge-b2b">Łańcuch Dostaw B2B</span>
+            </div>
+            <h3 class="sc-title">3. Zaopatrzenie Hurtowe</h3>
+            <p class="sc-desc">H1 ➔ P1: Hurtownia zamawia surowiec u Producenta</p>
+          </div>
+        </button>
+
+        <!-- Scenario 4 -->
+        <button class="scenario-card" id="btn-scen-4" onclick="triggerScenario(4)">
+          <div class="sc-icon-wrapper scen-4">👤</div>
+          <div class="sc-content">
+            <div class="sc-top">
+              <span class="sc-badge badge-hitl">Human-in-the-Loop</span>
+            </div>
+            <h3 class="sc-title">4. Decyzja Człowieka</h3>
+            <p class="sc-desc">R2 ➔ H1: Agent wstrzymuje zakup do akceptacji operatora</p>
+          </div>
+        </button>
+      </div>
+
+      <div class="scenario-bar-actions">
+        <button class="btn btn-secondary btn-sm" id="btn-reset" onclick="resetDemonstration()" title="Wyczyść widok i zresetuj oś czasu">
+          <span class="btn-icon">🔄</span> Reset
+        </button>
+      </div>
+    </section>
+
+    <!-- Interactive Stepper Bar (Oś Czasu Handlu - 5 Kroków CNP) -->
+    <nav class="stepper-nav" aria-label="Przebieg Handlu">
+      <div class="stepper-progress-bg">
+        <div class="stepper-progress-fill" id="stepper-fill" style="width: 0%;"></div>
+      </div>
+
+      <div class="stepper-steps">
+        <!-- Step 1 -->
+        <div class="stepper-step" id="step-node-1" data-step="1">
+          <div class="step-circle">
+            <span class="step-num">1</span>
+            <span class="step-icon">🔍</span>
+          </div>
+          <div class="step-info">
+            <span class="step-subtitle">KROK 1</span>
+            <span class="step-title">Dostępność Towaru</span>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="stepper-step" id="step-node-2" data-step="2">
+          <div class="step-circle">
+            <span class="step-num">2</span>
+            <span class="step-icon">🏷️</span>
+          </div>
+          <div class="step-info">
+            <span class="step-subtitle">KROK 2</span>
+            <span class="step-title">Zbieranie Ofert</span>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="stepper-step" id="step-node-3" data-step="3">
+          <div class="step-circle">
+            <span class="step-num">3</span>
+            <span class="step-icon">⚖️</span>
+          </div>
+          <div class="step-info">
+            <span class="step-subtitle">KROK 3</span>
+            <span class="step-title">Wybór Oferty</span>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="stepper-step" id="step-node-4" data-step="4">
+          <div class="step-circle">
+            <span class="step-num">4</span>
+            <span class="step-icon">🤝</span>
+          </div>
+          <div class="step-info">
+            <span class="step-subtitle">KROK 4</span>
+            <span class="step-title">Kontrakt / Decyzja</span>
+          </div>
+        </div>
+
+        <!-- Step 5 -->
+        <div class="stepper-step" id="step-node-5" data-step="5">
+          <div class="step-circle">
+            <span class="step-num">5</span>
+            <span class="step-icon">🚚</span>
+          </div>
+          <div class="step-info">
+            <span class="step-subtitle">KROK 5</span>
+            <span class="step-title">Dostawa i Rozliczenie</span>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Workspace (Split View: Graph Canvas & Live Storyline) -->
     <main class="main-content">
-      <!-- Graph Canvas Container -->
+      <!-- Left Column: Graph Canvas Section -->
       <section class="graph-section">
         <div class="graph-controls">
           <div class="legend">
             <span class="legend-item"><span class="badge badge-avail">🔍 Dostępność</span></span>
             <span class="legend-item"><span class="badge badge-rfq">📑 Zapytanie (CFP)</span></span>
-            <span class="legend-item"><span class="badge badge-prop">🏷️ Oferta</span></span>
+            <span class="legend-item"><span class="badge badge-prop">🏷️ Oferta Cenowa</span></span>
             <span class="legend-item"><span class="badge badge-accept">🤝 Akceptacja</span></span>
             <span class="legend-item"><span class="badge badge-reject">❌ Odrzucenie</span></span>
             <span class="legend-item"><span class="badge badge-delivery">🚚 Dostawa</span></span>
           </div>
-          <div class="speed-control">
-            <span class="speed-label">Prędkość pakietów:</span>
-            <input type="range" id="speed-slider" min="800" max="3000" step="200" value="1800">
-            <span id="speed-val">1.8s</span>
+          <div class="graph-hint">
+            <span>Kliknij węzeł, aby podejrzeć magazyn w SQLite</span>
           </div>
         </div>
 
@@ -76,28 +195,28 @@
             <defs>
               <!-- Edge Gradient Definitions -->
               <linearGradient id="grad-p1-h1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.6"/>
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.65"/>
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.65"/>
               </linearGradient>
               <linearGradient id="grad-p1-h2" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.6"/>
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.65"/>
+                <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.65"/>
               </linearGradient>
               <linearGradient id="grad-h1-r1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#10b981" stop-opacity="0.6"/>
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.65"/>
+                <stop offset="100%" stop-color="#10b981" stop-opacity="0.65"/>
               </linearGradient>
               <linearGradient id="grad-h1-r2" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#ec4899" stop-opacity="0.6"/>
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.65"/>
+                <stop offset="100%" stop-color="#ec4899" stop-opacity="0.65"/>
               </linearGradient>
               <linearGradient id="grad-h2-r1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#10b981" stop-opacity="0.6"/>
+                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.65"/>
+                <stop offset="100%" stop-color="#10b981" stop-opacity="0.65"/>
               </linearGradient>
               <linearGradient id="grad-h2-r2" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.6"/>
-                <stop offset="100%" stop-color="#ec4899" stop-opacity="0.6"/>
+                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.65"/>
+                <stop offset="100%" stop-color="#ec4899" stop-opacity="0.65"/>
               </linearGradient>
 
               <!-- Node Glow Filters -->
@@ -153,53 +272,53 @@
 
             <!-- Graph Nodes -->
             <g id="nodes-group">
-              <!-- Node P1 (Top) -->
+              <!-- Node P1 (Top: Producent) -->
               <g class="graph-node" id="node-P1" transform="translate(500, 100)" data-node="P1">
-                <circle class="node-halo" r="54" filter="url(#glow-gold)" stroke="#f59e0b"></circle>
-                <circle class="node-body" r="42" fill="#1e1b18" stroke="#f59e0b" stroke-width="3"></circle>
-                <text class="node-icon" y="-4" text-anchor="middle">🏭</text>
-                <text class="node-title" y="16" text-anchor="middle">P1</text>
-                <text class="node-sub" y="60" text-anchor="middle">Producent (:8001)</text>
+                <circle class="node-halo" r="62" filter="url(#glow-gold)" stroke="#f59e0b"></circle>
+                <circle class="node-body" r="48" fill="#1e1b18" stroke="#f59e0b" stroke-width="3"></circle>
+                <text class="node-icon" y="-6" text-anchor="middle">🏭</text>
+                <text class="node-title" y="18" text-anchor="middle">P1</text>
+                <text class="node-sub" y="70" text-anchor="middle">Producent (:8001)</text>
               </g>
 
-              <!-- Node H1 (Mid Left) -->
+              <!-- Node H1 (Mid Left: Hurtownia 1) -->
               <g class="graph-node" id="node-H1" transform="translate(240, 310)" data-node="H1">
-                <circle class="node-halo" r="54" filter="url(#glow-blue)" stroke="#3b82f6"></circle>
-                <circle class="node-body" r="42" fill="#141c2b" stroke="#3b82f6" stroke-width="3"></circle>
-                <text class="node-icon" y="-4" text-anchor="middle">🏢</text>
-                <text class="node-title" y="16" text-anchor="middle">H1</text>
-                <text class="node-sub" y="60" text-anchor="middle">Hurtownia 1 (:8004)</text>
-                <text class="node-balance" id="badge-bal-H1" y="-50" text-anchor="middle">13 835 PLN</text>
+                <circle class="node-halo" r="62" filter="url(#glow-blue)" stroke="#3b82f6"></circle>
+                <circle class="node-body" r="48" fill="#141c2b" stroke="#3b82f6" stroke-width="3"></circle>
+                <text class="node-icon" y="-6" text-anchor="middle">🏢</text>
+                <text class="node-title" y="18" text-anchor="middle">H1</text>
+                <text class="node-sub" y="70" text-anchor="middle">Hurtownia 1 (:8004)</text>
+                <text class="node-balance" id="badge-bal-H1" y="-56" text-anchor="middle">-- PLN</text>
               </g>
 
-              <!-- Node H2 (Mid Right) -->
+              <!-- Node H2 (Mid Right: Hurtownia 2) -->
               <g class="graph-node" id="node-H2" transform="translate(760, 310)" data-node="H2">
-                <circle class="node-halo" r="54" filter="url(#glow-purple)" stroke="#8b5cf6"></circle>
-                <circle class="node-body" r="42" fill="#1f182b" stroke="#8b5cf6" stroke-width="3"></circle>
-                <text class="node-icon" y="-4" text-anchor="middle">🏬</text>
-                <text class="node-title" y="16" text-anchor="middle">H2</text>
-                <text class="node-sub" y="60" text-anchor="middle">Hurtownia 2 (:8005)</text>
-                <text class="node-balance" id="badge-bal-H2" y="-50" text-anchor="middle">1 049 PLN</text>
+                <circle class="node-halo" r="62" filter="url(#glow-purple)" stroke="#8b5cf6"></circle>
+                <circle class="node-body" r="48" fill="#1f182b" stroke="#8b5cf6" stroke-width="3"></circle>
+                <text class="node-icon" y="-6" text-anchor="middle">🏬</text>
+                <text class="node-title" y="18" text-anchor="middle">H2</text>
+                <text class="node-sub" y="70" text-anchor="middle">Hurtownia 2 (:8005)</text>
+                <text class="node-balance" id="badge-bal-H2" y="-56" text-anchor="middle">-- PLN</text>
               </g>
 
-              <!-- Node R1 (Bottom Left) -->
+              <!-- Node R1 (Bottom Left: Restauracja 1) -->
               <g class="graph-node" id="node-R1" transform="translate(300, 550)" data-node="R1">
-                <circle class="node-halo" r="54" filter="url(#glow-green)" stroke="#10b981"></circle>
-                <circle class="node-body" r="42" fill="#14261f" stroke="#10b981" stroke-width="3"></circle>
-                <text class="node-icon" y="-4" text-anchor="middle">🍕</text>
-                <text class="node-title" y="16" text-anchor="middle">R1</text>
-                <text class="node-sub" y="60" text-anchor="middle">Restauracja 1 (:8002)</text>
-                <text class="node-balance" id="badge-bal-R1" y="-50" text-anchor="middle">1 038 PLN</text>
+                <circle class="node-halo" r="62" filter="url(#glow-green)" stroke="#10b981"></circle>
+                <circle class="node-body" r="48" fill="#14261f" stroke="#10b981" stroke-width="3"></circle>
+                <text class="node-icon" y="-6" text-anchor="middle">🍕</text>
+                <text class="node-title" y="18" text-anchor="middle">R1</text>
+                <text class="node-sub" y="70" text-anchor="middle">Restauracja 1 (:8002)</text>
+                <text class="node-balance" id="badge-bal-R1" y="-56" text-anchor="middle">-- PLN</text>
               </g>
 
-              <!-- Node R2 (Bottom Right) -->
+              <!-- Node R2 (Bottom Right: Restauracja 2) -->
               <g class="graph-node" id="node-R2" transform="translate(700, 550)" data-node="R2">
-                <circle class="node-halo" r="54" filter="url(#glow-pink)" stroke="#ec4899"></circle>
-                <circle class="node-body" r="42" fill="#2b1424" stroke="#ec4899" stroke-width="3"></circle>
-                <text class="node-icon" y="-4" text-anchor="middle">🍝</text>
-                <text class="node-title" y="16" text-anchor="middle">R2</text>
-                <text class="node-sub" y="60" text-anchor="middle">Restauracja 2 (:8003)</text>
-                <text class="node-balance" id="badge-bal-R2" y="-50" text-anchor="middle">14 887 PLN</text>
+                <circle class="node-halo" r="62" filter="url(#glow-pink)" stroke="#ec4899"></circle>
+                <circle class="node-body" r="48" fill="#2b1424" stroke="#ec4899" stroke-width="3"></circle>
+                <text class="node-icon" y="-6" text-anchor="middle">🍝</text>
+                <text class="node-title" y="18" text-anchor="middle">R2</text>
+                <text class="node-sub" y="70" text-anchor="middle">Restauracja 2 (:8022)</text>
+                <text class="node-balance" id="badge-bal-R2" y="-56" text-anchor="middle">-- PLN</text>
               </g>
             </g>
           </svg>
@@ -226,7 +345,7 @@
               <span class="nc-badge online">ONLINE</span>
             </div>
             <div class="nc-details">
-              <span>Saldo: <b id="stat-h1-bal">13 835 PLN</b></span>
+              <span>Saldo: <b id="stat-h1-bal">-- PLN</b></span>
               <span id="stat-h1-stock">Magazyn: 11 poz.</span>
             </div>
           </div>
@@ -238,7 +357,7 @@
               <span class="nc-badge online">ONLINE</span>
             </div>
             <div class="nc-details">
-              <span>Saldo: <b id="stat-h2-bal">1 049 PLN</b></span>
+              <span>Saldo: <b id="stat-h2-bal">-- PLN</b></span>
               <span id="stat-h2-stock">Magazyn: 11 poz.</span>
             </div>
           </div>
@@ -250,7 +369,7 @@
               <span class="nc-badge online">ONLINE</span>
             </div>
             <div class="nc-details">
-              <span>Saldo: <b id="stat-r1-bal">1 038 PLN</b></span>
+              <span>Saldo: <b id="stat-r1-bal">-- PLN</b></span>
               <span id="stat-r1-stock">Spiżarnia: 11 poz.</span>
             </div>
           </div>
@@ -262,117 +381,109 @@
               <span class="nc-badge online">ONLINE</span>
             </div>
             <div class="nc-details">
-              <span>Saldo: <b id="stat-r2-bal">14 887 PLN</b></span>
+              <span>Saldo: <b id="stat-r2-bal">-- PLN</b></span>
               <span id="stat-r2-stock">Magazyn: 11 poz.</span>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- Right Sidebar: Interactive Chat & Live Events Stream -->
-      <aside class="sidebar mode-chat" id="app-sidebar">
-        <!-- Sidebar Navigation Tabs -->
-        <div class="sidebar-tabs">
-          <button class="sb-tab active" id="tab-btn-chat" onclick="switchSidebarTab('chat')">
-            <span class="tab-icon">💬</span> Czat z Agentami
-          </button>
-          <button class="sb-tab" id="tab-btn-feed" onclick="switchSidebarTab('feed')">
-            <span class="tab-icon">📡</span> Strumień JSON
-            <span class="tab-badge" id="feed-count-badge" style="display:none;">0</span>
-          </button>
-          <button class="sb-tab" id="tab-btn-split" onclick="switchSidebarTab('split')" title="Widok podzielony">
-            <span class="tab-icon">◫</span> Podzielony
-          </button>
+      <!-- Right Column: Live Trading Storyline & Protocol Inspector -->
+      <aside class="sidebar-narrative">
+        <!-- Active Scenario Card -->
+        <div class="scenario-banner" id="scenario-banner">
+          <div class="sb-header">
+            <span class="sb-badge" id="banner-badge">GOTOWY</span>
+            <span class="sb-time" id="banner-time">--:--:--</span>
+          </div>
+          <h2 class="sb-title" id="banner-title">Wybierz scenariusz u góry</h2>
+          <p class="sb-desc" id="banner-desc">Kliknij jeden z 4 kafelków scenariuszy na pasku powyżej, aby zobaczyć demonstrację przebiegu handlu agentów krok po kroku.</p>
         </div>
 
-        <!-- Chat View Container -->
-        <div class="sidebar-view" id="view-chat">
-          <div class="chat-topbar">
-            <div class="chat-target-select-wrapper">
-              <label for="side-chat-target" class="chat-target-label">Agent:</label>
-              <select id="side-chat-target" class="chat-agent-dropdown" onchange="onChatTargetChange(this.value)">
-                <option value="R2" selected>🍝 Restauracja 2 (R2) — wymaga akceptacji człowieka</option>
-                <option value="R1">🍕 Restauracja 1 (R1) — autonomiczna</option>
-                <option value="H1">🏢 Hurtownia 1 (H1)</option>
-                <option value="H2">🏬 Hurtownia 2 (H2)</option>
-              </select>
+        <!-- Current Step Narrative Card -->
+        <div class="narrative-card" id="narrative-card">
+          <div class="nc-header">
+            <div class="nc-step-pill" id="current-step-pill">
+              <span class="pill-dot"></span>
+              <span id="current-step-label">Oczekiwanie na start</span>
             </div>
-            <button class="icon-btn-sm" id="btn-clear-chat" title="Wyczyść historię czatu z tym agentem" onclick="clearCurrentChat()">
-              <span>🗑️</span>
-            </button>
-          </div>
-
-          <!-- Messages Thread -->
-          <div class="chat-thread" id="chat-thread">
-            <!-- Bubbles injected dynamically by app.js -->
-          </div>
-
-          <!-- Typing Indicator -->
-          <div class="chat-typing-row" id="chat-typing-indicator" style="display: none;">
-            <div class="chat-typing-bubble">
-              <span id="typing-agent-name">Agent</span> przetwarza polecenie
-              <span class="typing-dots">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
-              </span>
+            <div class="nc-route-pill" id="current-route-pill" style="display: none;">
+              <span id="route-src">SRC</span>
+              <span class="pill-arrow">➔</span>
+              <span id="route-tgt">TGT</span>
             </div>
           </div>
 
-          <!-- Quick Action Chips (Confirmation / Common Tasks) -->
-          <div class="chat-quick-chips" id="chat-quick-chips">
-            <button class="quick-chip chip-confirm" onclick="quickSendChat('Tak, potwierdzam zakup')">
-              ✅ Tak, potwierdzam zakup
-            </button>
-            <button class="quick-chip chip-cancel" onclick="quickSendChat('Nie, anuluj')">
-              ❌ Nie, anuluj
-            </button>
-            <button class="quick-chip chip-action" onclick="quickFillChat('Przygotuj 5x Pizza Margherita')">
-              🍕 Przygotuj 5x Pizza
-            </button>
-            <button class="quick-chip chip-action" onclick="quickFillChat('Sprawdź stan mąki w magazynie')">
-              📦 Stan mąki
-            </button>
-            <button class="quick-chip chip-action" onclick="quickFillChat('Kup 10 kg mąki w hurtowniach')">
-              🌾 Kup 10kg mąki
-            </button>
+          <h3 class="nc-headline" id="narrative-headline">Wizualizacja Przebiegu Handlu</h3>
+          
+          <div class="nc-story-box" id="narrative-story">
+            Nakładka prezentuje w czasie rzeczywistym 5-etapowy protokół negocjacji i handlu agentowego (Contract Net Protocol w standardzie MCP). Wybierz scenariusz, aby obserwować wymianę wiadomości.
           </div>
 
-          <!-- Input Footer -->
-          <div class="chat-input-bar">
-            <textarea
-              id="side-chat-input"
-              class="chat-textarea"
-              placeholder="Wpisz polecenie lub odpowiedź (np. 'Tak, potwierdzam')... [Enter = Wyślij]"
-              rows="2"
-            ></textarea>
-            <button class="btn btn-primary chat-send-btn" id="btn-side-send-chat" onclick="submitSideChat()">
-              <span class="btn-icon">➤</span>
+          <!-- Protocol Rule Box -->
+          <div class="nc-rule-box" id="narrative-rule-box">
+            <div class="rule-title">
+              <span>💡 Reguła Protokołu:</span>
+            </div>
+            <div class="rule-text" id="narrative-rule-text">
+              Protokół gwarantuje spójność ACID, zasadę milczenia wobec przegranych ofert oraz atomowe rozliczenie finansowo-magazynowe.
+            </div>
+          </div>
+        </div>
+
+        <!-- Human-in-the-Loop Decision Interactive Alert (Scenario 4) -->
+        <div class="hitl-box" id="hitl-action-box" style="display: none;">
+          <div class="hitl-header">
+            <span class="hitl-pulse-dot"></span>
+            <h4>⚠️ Wymagana Decyzja Człowieka (HITL)</h4>
+          </div>
+          <p class="hitl-text" id="hitl-prompt-text">
+            Agent Restauracji 2 wynegocjował najtańszą ofertę w Hurtowni H1: <b>10 kg Mozzarella za 85.00 PLN</b> (oszczędność 60.00 PLN). Zgodnie z polityką HITL transakcja została wstrzymana.
+          </p>
+          <div class="hitl-actions">
+            <button class="btn btn-success hitl-btn" id="btn-hitl-approve" onclick="submitHitlDecision('approve')">
+              ✅ Zatwierdź zakup (85.00 PLN)
+            </button>
+            <button class="btn btn-danger hitl-btn" id="btn-hitl-reject" onclick="submitHitlDecision('reject')">
+              ❌ Odrzuć transakcję
             </button>
           </div>
         </div>
 
-        <!-- Live JSON Events Feed Container -->
-        <div class="sidebar-view" id="view-feed" style="display: none;">
-          <div class="sidebar-header">
-            <div class="sb-title">
-              <span class="pulse-indicator"></span>
-              <h2>Strumień Wiadomości JSON</h2>
+        <!-- Protocol JSON Inspector -->
+        <div class="json-inspector-card">
+          <div class="jic-header">
+            <div class="jic-title">
+              <span>📄 Ostatni Pakiet JSON</span>
+              <span class="jic-type" id="json-type-badge">MCP / CNP</span>
             </div>
-            <button class="clear-btn" id="btn-clear-feed" title="Wyczyść listę">Wyczyść</button>
+            <button class="icon-btn-sm" onclick="copyCurrentJson()" title="Kopiuj JSON do schowka">
+              <span>📋</span> Kopiuj
+            </button>
           </div>
+          <div class="jic-body">
+            <pre class="json-viewer" id="live-json-viewer"><code>{
+  "status": "waiting_for_trade_scenario",
+  "protocol": "Contract Net Protocol (CNP)",
+  "schema": "docs/schemas/json-schemas/"
+}</code></pre>
+          </div>
+        </div>
 
-          <div class="events-feed" id="events-feed">
-            <div class="empty-state" id="feed-empty">
-              <p>Oczekiwanie na pierwsze pakiety JSON...</p>
-              <small>Użyj przycisków CNP u góry lub czatuj z agentami, aby zobaczyć przelatujące piktogramy.</small>
-            </div>
+        <!-- Session Steps Log -->
+        <div class="steps-history-card">
+          <div class="shc-header">
+            <h4>Dziennik Kroków Sesji</h4>
+            <button class="clear-btn" onclick="clearStepLog()">Wyczyść</button>
+          </div>
+          <div class="shc-list" id="steps-history-list">
+            <div class="shc-empty" id="history-empty">Brak zarejestrowanych kroków w bieżącej sesji.</div>
           </div>
         </div>
       </aside>
     </main>
 
-    <!-- Node Details Drawer / Modal -->
+    <!-- Node Details Modal -->
     <div class="modal-backdrop" id="node-modal">
       <div class="modal-card">
         <div class="modal-header">

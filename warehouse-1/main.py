@@ -37,6 +37,7 @@ async def periodic_audit():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db(products_info)
     audit_task = asyncio.create_task(periodic_audit())
     yield
     audit_task.cancel()
@@ -64,7 +65,5 @@ app.mount("/mcp", mcp.sse_app())
 
 if __name__ == "__main__":
     import uvicorn
-    if not db_path.exists():
-        init_db(products_info)
-
+    init_db(products_info)
     uvicorn.run("main:app", host="127.0.0.1", port=8004, reload=True)
